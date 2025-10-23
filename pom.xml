@@ -96,7 +96,22 @@
         <dependency>
             <groupId>de.fraunhofer.aisec</groupId>
             <artifactId>cpg-core</artifactId>
+            <version>8.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.neo4j</groupId>
+            <artifactId>neo4j-ogm-core</artifactId>
+            <version>5.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>de.fraunhofer.aisec</groupId>
+            <artifactId>cpg-neo4j</artifactId>
             <version>10.8.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-kotlin</artifactId>
+            <version>2.9.8</version>
         </dependency>
     </dependencies>
 
