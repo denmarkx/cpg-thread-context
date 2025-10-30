@@ -96,7 +96,7 @@
         <dependency>
             <groupId>de.fraunhofer.aisec</groupId>
             <artifactId>cpg-core</artifactId>
-            <version>8.3.0</version>
+            <version>10.8.2</version>
         </dependency>
         <dependency>
             <groupId>org.neo4j</groupId>
