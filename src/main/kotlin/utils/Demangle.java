@@ -115,7 +115,6 @@ public class Demangle {
 
         // Remove trailing :: from path:
         path.delete(path.length()-2, path.length());
-        System.out.println(path);
         return path.toString();
     }
 }

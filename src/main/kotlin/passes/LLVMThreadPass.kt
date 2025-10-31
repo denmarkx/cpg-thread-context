@@ -3,187 +3,184 @@ package passes
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.blocks
-import de.fraunhofer.aisec.cpg.graph.builder.dec
+import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.parameters
+import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
-
-// TODO: hngghhhh
-// TODO: eerrrghh
-// TODO: obviously the mangled names being hardcoded is not the best thing
-// need to figure out either how to demangle. pattern match is obvious and may be the easiest thing.
+import utils.Demangle
 
 @ExecuteLast
 class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
-
+    lateinit var nodes : List<Node>
     override fun cleanup() {}
 
-    // todo
-    fun int_find_call_within_block(b: Block, name: String): CallExpression? {
-        val block_nodes = SubgraphWalker.flattenAST(b);
-        for (b in block_nodes) {
-            if (b is CallExpression) {
-//                println(b)
-            }
-        }
-        val target = block_nodes
-            .filterIsInstance<CallExpression>()
-            .find { it.name.localName.startsWith(name) }
-        return target
-    }
-
-    fun find_call_within_block(blocks: List<Block>, name: String): CallExpression? {
-        var builder_raw_spawn: CallExpression? = null;
-        for (block in blocks) {
-            builder_raw_spawn = int_find_call_within_block(block, name);
-            if (builder_raw_spawn != null) break;
-        }
-        return builder_raw_spawn;
-    }
-
-    fun expressCallAsFuncDecl(nodes: List<Node>, c: CallExpression?) : FunctionDeclaration? {
+    fun findFunctionByName(name: String, exactName: Boolean =false): FunctionDeclaration? {
+        /*
+        * Given an unmangled function name, return the corresponding FunctionDeclaration or null.
+        * If exactName=true, name is expected to be mangled.
+        */
         return nodes
             .filterIsInstance<FunctionDeclaration>()
-            .find { it.name.localName.equals(c?.name?.localName) }
+            .find {
+                (if (!exactName) {
+                    Demangle.demangle(it.name.localName).equals(name)
+                } else {
+                    it.name.localName == name
+                })
+            }
+    }
+
+    fun findFunctionWithinCallParams(call: CallExpression?, name: String): FunctionDeclaration? {
+        /*
+        * CallExpression's parameters may contain a function pointer that isn't marked as FnOnce, Fn, FnMut, etc.
+        * Example: call i32 @__rust_try(void (i8*)* @std::panicking::try::do_call)
+        *
+        * Normally, we would be able to get the function pointer from the ParameterDeclaration of rust_try's FunctionDecl.
+        * However, the ParameterDeclaration doesn't hold anyway to grab the Reference.
+        *
+        * This uses the CallExpr instead and traverses through its references in hopes to find the given name.
+        */
+        val reference = call.refs
+            .find { Demangle.demangle(it.name.localName) == name }
+
+        if (reference == null) return null
+
+        // From the reference, get the corresponding function decl.
+        return reference.refersTo as FunctionDeclaration
+    }
+
+    fun findCallWithinBlocks(blocks: List<Block>, name: String): CallExpression? {
+        /*
+        * Given a list of Blocks and an unmangled name, return the CallExpression
+        * if found within the blocks.
+        */
+        var callCandidate: CallExpression? = null
+
+        for (block in blocks) {
+            // Grab the CallExpression:
+            callCandidate = SubgraphWalker.flattenAST(block)
+                .filterIsInstance<CallExpression>()
+                .find { Demangle.demangle(it.name.localName).equals(name)}
+            if (callCandidate != null) break
+        }
+
+        return callCandidate
+    }
+
+    fun findFunctionWithinBlocks(blocks: List<Block>, name: String): FunctionDeclaration? {
+        /*
+        * Given a list of Blocks and an unmangled name, determine if the function is called
+        * from somewhere within the blocks and return the declaration.
+        */
+
+        // If there was never a CallExpression found, that means this function was never called within
+        // the list of blocks we were given.
+        val functionCandidate: CallExpression = findCallWithinBlocks(blocks, name) ?: return null
+
+        // Then the FunctionDeclaration:
+        return findFunctionByName(functionCandidate.name.localName, exactName = true)
+    }
+
+    fun findVTableWithinBlocks(blocks: List<Block>): VariableDeclaration? {
+        /*
+        * Given a list of blocks, looks for a reference to a vtable and returns the VariableDeclaration or null.
+        * This assumes that only one vtable is referenced within all the blocks.
+        */
+        var vtableReference: Reference? = null
+        for (block in blocks) {
+            vtableReference = SubgraphWalker.flattenAST(block)
+                .filterIsInstance<Reference>()
+                .find { it.name.contains("vtable") }
+            if (vtableReference != null) break
+        }
+
+        // Handle no vtable being found:
+        if (vtableReference == null) return null;
+
+        // Otherwise, grab the variabledecl:
+        return vtableReference.refersTo as VariableDeclaration
+    }
+
+    fun getVTableShim(vtable: VariableDeclaration?): FunctionDeclaration? {
+        /*
+        * Given a VarDecl to a vtable, return the FunctionDeclaration that is stored within.
+        */
+        // The vtable is stored as  <{ i8*, [16 x i8], i8*, [0 x i8] }>
+        // ..which is a fat pointer. The only thing we want here is the second pointer.
+        val references = vtable.nodes.filterIsInstance<Reference>()
+        if (references.isEmpty() || references.size < 2) return null
+        return references[1].refersTo as FunctionDeclaration
     }
 
     override fun accept(t: TranslationUnitDeclaration) {
-        val nodes = SubgraphWalker.flattenAST(t);
-        val targetA = nodes
-            .filterIsInstance<CallExpression>()
-            .find { it.name.localName.contains("_ZN3std6thread5spawn17h5c73a64a896f1bb0E") }
+        nodes = SubgraphWalker.flattenAST(t)
 
-        val thread_spawn_func = nodes
-            .filterIsInstance<FunctionDeclaration>()
-            .find { it.name.localName.contains("_ZN3std6thread5spawn17h5c73a64a896f1bb0E") }
-//        for (n in thread_spawn_func?.nextEOG!!) {
-//            println(n);
-//            for (j in n?.nextEOG!!) {
-//                println(j);
-//            }
-//      }
+        // TODO: this only handles 1 thread spawn
+        /*
+        * The flow for a thread.spawn -> the actual thread contents is:
+        * 1. std.thread.spawn
+        * 2. std.thread.builder.spawn
+        * 3. std.thread.builder.spawn_unchecked
+        * 4. (vtable reference within a block for #3)
+        * 5. vtable shim method
+        * 6. std.thread.builder.spawn_unchecked (closure)
+        * 7. std.panic.catch_unwind
+        * 8. std.panicking.try
+        * 9. __rust_try
+        * 10. <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+        * 11. std.thread.builder.spawn_unchecked {closure (closure)}
+        * 12. std.sys_common.backtrace.rust_begin_short_backtrace
+        * 13. new thread contents start within function of the next call expression.
+        */
+        val threadSpawn = findFunctionByName("std::thread::spawn")
+        assert(threadSpawn != null)
 
-        var builder_spawn: CallExpression? = find_call_within_block(thread_spawn_func.blocks,"_ZN3std6thread7Builder5spawn17h48ffddbcee68916cE");
-        var builder_raw_spawn: CallExpression? = find_call_within_block(expressCallAsFuncDecl(nodes, builder_spawn).blocks,"_ZN3std6thread7Builder15spawn_unchecked17h4e6d3c933a0892e8E");
+        val threadBuilderSpawn = findFunctionWithinBlocks(threadSpawn.blocks, "std::thread::Builder::spawn")
+        assert(threadBuilderSpawn != null)
 
-        val brs_as_func = expressCallAsFuncDecl(nodes, builder_raw_spawn)
-        // Internally, part of the std::thread::Builder::spawn_unchecked used FnOnce, Fn, or FnMut.
-        // (In this case, FnOnce). This is tracked to "call_once". Since Fn(..) is dynamically dispatched,
-        // the next logical function is kept within a vtable.
-        var vtable_ref : Reference? = null;
-        for (b in brs_as_func.blocks) {
-            // We're looking for a reference to a vtable somewhere within here.
-            vtable_ref = SubgraphWalker.flattenAST(b)
-                .filterIsInstance<Reference>()
-                .find { it.name.contains("vtable") }
-            if (vtable_ref != null) break;
-        }
+        val threadBuilderSpawnRaw = findFunctionWithinBlocks(threadBuilderSpawn.blocks, "std::thread::Builder::spawn_unchecked")
+        assert(threadBuilderSpawnRaw != null)
 
-        // get the actual var decl of the vtable:
-        val vtable : VariableDeclaration = vtable_ref?.refersTo!! as VariableDeclaration
-        // println(vtable.nodes)
+        val vtable = findVTableWithinBlocks(threadBuilderSpawnRaw.blocks)
+        assert(vtable != null)
 
-        // what i am looking for here is the vtable shim
-        // the structure of vtable right now is
-        // <{ i8*, [16 x i8], i8*, [0 x i8] }>
-        // (which is the same structure as a fat pointer would be)
+        val vtableShim = getVTableShim(vtable)
+        assert(vtableShim != null)
 
-        // the 2nd pointer (which would be a reference) is what i want
-        // for some reason vtable.parameters is empty...?
-        var i = 0;
-        var vtable_shim_ref : Reference? = null;
+        val builderClosure = findFunctionWithinBlocks(vtableShim.blocks, "std::thread::Builder::spawn_unchecked::{{closure}}")
+        assert(builderClosure != null)
 
-        for (p in vtable.nodes) {
-            if (p is Reference) {
-                if (i == 0) {
-                    i++;
-                    continue;
-                }
-                vtable_shim_ref = p;
-                break;
-            }
-        }
+        val catchUnwind = findFunctionWithinBlocks(builderClosure.blocks, "std::panic::catch_unwind")
+        assert(catchUnwind != null)
 
-        val vtable_shim : FunctionDeclaration = vtable_shim_ref?.refersTo!! as FunctionDeclaration;
+        val catchTry = findFunctionWithinBlocks(catchUnwind.blocks, "std::panicking::try")
+        assert(catchTry != null)
 
-        // knowing this shim comes directly from a thread builder, the next call expression
-        // would be the closure
-        val builder_closure = find_call_within_block(vtable_shim.blocks, "_ZN3std6thread7Builder15spawn_unchecked28_")
-        val builder_closure_func = expressCallAsFuncDecl(nodes, builder_closure)
+        val rustTry = findCallWithinBlocks(catchTry.blocks, "__rust_try")
+        assert(rustTry != null)
 
-        // this closure has a catch_unwind
-        val catch_unwind = find_call_within_block(builder_closure_func.blocks, "_ZN3std5panic12catch_unwind17h862de239673f13bcE")
-        val catch_unwind_func = expressCallAsFuncDecl(nodes, catch_unwind)
+        val tryDoCall = findFunctionWithinCallParams(rustTry, "std::panicking::try::do_call")
+        assert(tryDoCall != null)
 
-        // where catch_unwind uses try:
-        val catch_try = find_call_within_block(catch_unwind_func.blocks, "_ZN3std9panicking3try17h898787034c7bcafaE")
-        val catch_try_func = expressCallAsFuncDecl(nodes, catch_try)
+        val unwindFn = findFunctionWithinBlocks(tryDoCall.blocks, "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once")
+        assert(unwindFn != null)
 
-        // where we will use __rust_try
-        val rust_try = find_call_within_block(catch_try_func.blocks, "__rust_try")
-        val rust_try_code = rust_try?.code!!.split(' ')
+        val builderInnerClosure = findFunctionWithinBlocks(unwindFn.blocks, "std::thread::Builder::spawn_unchecked::{{closure}}::{{closure}}")
+        assert(builderInnerClosure != null)
 
-        // HACKFIX: see below
-        val rust_try_code_do_call_name = rust_try_code[8].trim({it in charArrayOf('@', ',')});
-        val rust_try_code_do_call_func = nodes
-            .filterIsInstance<FunctionDeclaration>()
-            .find { it.name.equals(rust_try_code_do_call_name) }
+        val backtrace = findFunctionWithinBlocks(builderInnerClosure.blocks, "std::sys_common::backtrace::__rust_begin_short_backtrace")
+        assert(backtrace != null)
 
-        println(rust_try_code_do_call_name)
-        println(rust_try_code_do_call_func)
-
-        val unwind_fnonce = find_call_within_block(rust_try_code_do_call_func.blocks,
-            $$"_ZN115_$LT$core..panic..unwind_safe..AssertUnwindSafe"
-        )
-        val unwind_fnonce_func = expressCallAsFuncDecl(nodes, unwind_fnonce)
-        println(unwind_fnonce_func)
-
-        // isn't the eog supposed to help me here
-
-        // move to the inner closure of the closure within thread builder
-        val builer_inner_closure = find_call_within_block(unwind_fnonce_func.blocks,
-            "_ZN3std6thread7Builder15spawn_unchecked")
-        val builder_inner_closure_func = expressCallAsFuncDecl(nodes, builer_inner_closure)
-        println(builder_inner_closure_func)
-
-        // which only has 1 call to begin_short_backtrace.
-        val begin_short_backtrace = find_call_within_block(builder_inner_closure_func.blocks,
-            "_ZN3std10sys_common9backtrace28__rust_begin_short_backtrace17h24da2976f3e971d7E")
-        val begin_short_backtrace_func = expressCallAsFuncDecl(nodes, begin_short_backtrace)
-        println(begin_short_backtrace_func)
-
-        // which has a call to the closure that we have within main WHICH IS ALSO OUR SECOND THREAD
-        val main_closure = find_call_within_block(begin_short_backtrace_func.blocks,
-            name="_ZN4main4main28")
-        val main_closure_func = expressCallAsFuncDecl(nodes, main_closure)
-        println(main_closure_func)
-
-//        println(rust_try_code)
-        val rust_try_func = expressCallAsFuncDecl(nodes, rust_try)
-
-        // TODO: ok this part is the cpg library's fault
-        // the reference to do_call or do_catch are "ambiguous" so it sets it to null
-        for (p in rust_try_func.blocks) {
-            for (k in p.nodes) {
-//                println(k)
-            }
-        }
-
-        for (n in catch_try_func.blocks) {
-            for (r in n.nodes) {
-                if (r is CallExpression) {
-//                    println(r)
-                }
-            }
-        }
-        throw Exception("a");
+        // The first call from backtrace is the entry point of the second thread.
+        val thread2Entry = backtrace.calls[0]
+        assert(Demangle.demangle(thread2Entry.name.localName) == "main::main::{{closure}}")
     }
 }
