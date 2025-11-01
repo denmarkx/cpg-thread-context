@@ -175,7 +175,6 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             }
         }
 
-        println(threadEntryDecl)
         assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
     }
 }
