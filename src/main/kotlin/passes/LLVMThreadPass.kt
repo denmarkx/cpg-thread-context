@@ -124,63 +124,58 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         nodes = SubgraphWalker.flattenAST(t)
 
         // TODO: this only handles 1 thread spawn
-        /*
-        * The flow for a thread.spawn -> the actual thread contents is:
-        * 1. std.thread.spawn
-        * 2. std.thread.builder.spawn
-        * 3. std.thread.builder.spawn_unchecked
-        * 4. (vtable reference within a block for #3)
-        * 5. vtable shim method
-        * 6. std.thread.builder.spawn_unchecked (closure)
-        * 7. std.panic.catch_unwind
-        * 8. std.panicking.try
-        * 9. __rust_try
-        * 10. <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
-        * 11. std.thread.builder.spawn_unchecked {closure (closure)}
-        * 12. std.sys_common.backtrace.rust_begin_short_backtrace
-        * 13. new thread contents start within function of the next call expression.
-        */
-        val threadSpawn = findFunctionByName("std::thread::spawn")
-        assert(threadSpawn != null)
+        val threadSpawnFlow = arrayOf(
+            "std::thread::Builder::spawn",
+            "std::thread::Builder::spawn_unchecked",
+            "vtable",
+            "std::thread::Builder::spawn_unchecked::{{closure}}",
+            "std::panic::catch_unwind",
+            "std::panicking::try",
+            "__rust_try",
+            "std::panicking::try::do_call",
+            "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once",
+            "std::thread::Builder::spawn_unchecked::{{closure}}::{{closure}}",
+            "std::sys_common::backtrace::__rust_begin_short_backtrace",
+        )
 
-        val threadBuilderSpawn = findFunctionWithinBlocks(threadSpawn.blocks, "std::thread::Builder::spawn")
-        assert(threadBuilderSpawn != null)
+        var prevFuncDecl : FunctionDeclaration? = findFunctionByName("std::thread::spawn")
+        var threadEntryDecl : FunctionDeclaration? = null
+        var skipIndex = -1
 
-        val threadBuilderSpawnRaw = findFunctionWithinBlocks(threadBuilderSpawn.blocks, "std::thread::Builder::spawn_unchecked")
-        assert(threadBuilderSpawnRaw != null)
+        for ((i, funcName) in threadSpawnFlow.withIndex()) {
+            if (skipIndex == i) continue
 
-        val vtable = findVTableWithinBlocks(threadBuilderSpawnRaw.blocks)
-        assert(vtable != null)
+            // vtables are handled differently:
+            if (funcName == "vtable") {
+                val table = findVTableWithinBlocks(prevFuncDecl.blocks)
 
-        val vtableShim = getVTableShim(vtable)
-        assert(vtableShim != null)
+                // The prevFuncDecl becomes the shim:
+                prevFuncDecl = getVTableShim(table)
+                continue
+            }
 
-        val builderClosure = findFunctionWithinBlocks(vtableShim.blocks, "std::thread::Builder::spawn_unchecked::{{closure}}")
-        assert(builderClosure != null)
+            // Rust builtins are handled differently as well:
+            if (funcName.startsWith("__rust_")) {
+                // If we're given a builtin, this means that the given parameters are a function pointer that we need.
+                val builtinCall = findCallWithinBlocks(prevFuncDecl.blocks, funcName)
 
-        val catchUnwind = findFunctionWithinBlocks(builderClosure.blocks, "std::panic::catch_unwind")
-        assert(catchUnwind != null)
+                // In a general case, it will be whoever is next in the list.
+                prevFuncDecl = findFunctionWithinCallParams(builtinCall, threadSpawnFlow[i+1])
 
-        val catchTry = findFunctionWithinBlocks(catchUnwind.blocks, "std::panicking::try")
-        assert(catchTry != null)
+                // Then skip the next index:
+                skipIndex = i+1
+                continue
+            }
 
-        val rustTry = findCallWithinBlocks(catchTry.blocks, "__rust_try")
-        assert(rustTry != null)
+            prevFuncDecl = findFunctionWithinBlocks(prevFuncDecl.blocks, funcName)
 
-        val tryDoCall = findFunctionWithinCallParams(rustTry, "std::panicking::try::do_call")
-        assert(tryDoCall != null)
+            // If we're at the end (thread-spawn chains only), the next immediate call is the entry point for thread 2.
+            if (i == threadSpawnFlow.size - 1) {
+                threadEntryDecl = findFunctionByName(prevFuncDecl.calls[0].name.localName, true)
+            }
+        }
 
-        val unwindFn = findFunctionWithinBlocks(tryDoCall.blocks, "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once")
-        assert(unwindFn != null)
-
-        val builderInnerClosure = findFunctionWithinBlocks(unwindFn.blocks, "std::thread::Builder::spawn_unchecked::{{closure}}::{{closure}}")
-        assert(builderInnerClosure != null)
-
-        val backtrace = findFunctionWithinBlocks(builderInnerClosure.blocks, "std::sys_common::backtrace::__rust_begin_short_backtrace")
-        assert(backtrace != null)
-
-        // The first call from backtrace is the entry point of the second thread.
-        val thread2Entry = backtrace.calls[0]
-        assert(Demangle.demangle(thread2Entry.name.localName) == "main::main::{{closure}}")
+        println(threadEntryDecl)
+        assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
     }
 }
