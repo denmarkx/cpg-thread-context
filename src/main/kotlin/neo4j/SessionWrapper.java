@@ -8,6 +8,7 @@ import org.neo4j.driver.async.AsyncSession;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder;
 import org.neo4j.ogm.model.Property;
+import utils.AuxData;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -39,6 +40,18 @@ public class SessionWrapper {
                 }
                 var props = sanitizeProperties(map);
                 props.put("cpgId", node.getId());
+
+                // TODO: HACK
+                // TODO: need to figure out a way to map node.getId to the OGM's node (which uses a uuid).
+                if (node.getId() == -3015) {
+                    System.out.println("checking if hasdata: ");
+                    System.out.println(node.getPropertyList().get(7).getValue());
+                    if (AuxData.hasData((String) node.getPropertyList().get(7).getValue())) {
+                        System.out.println("has aux data");
+                        props.put("thread", "hello thread test put props");
+                    }
+                }
+
                 tx.run("CREATE (n:" +String.join(":", labels) + ") SET n=$props", Map.of("props", props));
             });
         });
