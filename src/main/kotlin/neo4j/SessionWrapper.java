@@ -5,9 +5,11 @@ import org.neo4j.driver.Driver;
 import org.neo4j.driver.GraphDatabase;
 import org.neo4j.driver.SessionConfig;
 import org.neo4j.driver.async.AsyncSession;
+import org.neo4j.ogm.context.MappingContext;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder;
 import org.neo4j.ogm.model.Property;
+import org.neo4j.ogm.utils.EntityUtils;
 import utils.AuxData;
 
 import java.util.*;
@@ -24,7 +26,8 @@ public class SessionWrapper {
         return driver;
     }
 
-    public static void persistGraph(List<DefaultNodeBuilder> nodeBuilders, List<DefaultRelationshipBuilder> relationshipBuilders) {
+    public static void persistGraph(OGMBuilderContext ctx) {
+        List<DefaultNodeBuilder> nodeBuilders = ctx.nodes;
         if (driver == null) getDriver();
         driver.executableQuery("MATCH (n) DETACH DELETE n").execute();
 
@@ -40,18 +43,7 @@ public class SessionWrapper {
                 }
                 var props = sanitizeProperties(map);
                 props.put("cpgId", node.getId());
-
-                // TODO: HACK
-                // TODO: need to figure out a way to map node.getId to the OGM's node (which uses a uuid).
-                if (node.getId() == -3015) {
-                    System.out.println("checking if hasdata: ");
-                    System.out.println(node.getPropertyList().get(7).getValue());
-                    if (AuxData.hasData((String) node.getPropertyList().get(7).getValue())) {
-                        System.out.println("has aux data");
-                        props.put("thread", "hello thread test put props");
-                    }
-                }
-
+                ctx.auxUpdateProperties(node, props);
                 tx.run("CREATE (n:" +String.join(":", labels) + ") SET n=$props", Map.of("props", props));
             });
         });

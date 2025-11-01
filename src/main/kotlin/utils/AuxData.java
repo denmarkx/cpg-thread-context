@@ -4,18 +4,17 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 public class AuxData {
-    private static final Map<String, String> auxData = new WeakHashMap<>();
+    private static final Map<Object, String> auxData = new WeakHashMap<>();
 
-    public static void addData(String id, String data) {
-        System.out.println("addData: " + id);
-        auxData.put(id, data);
+    public static void addData(Object o, String data) {
+        auxData.put(o, data);
     }
 
-    public static boolean hasData(String id) {
-        return auxData.containsKey(id);
+    public static boolean hasData(Object o) {
+        return auxData.containsKey(o);
     }
 
-    public static String getData(String id) {
-        return auxData.get(id);
+    public static String getData(Object o) {
+        return auxData.get(o);
     }
 }

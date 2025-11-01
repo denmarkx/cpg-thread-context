@@ -17,6 +17,7 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import utils.AuxData
 import utils.Demangle
+import kotlin.uuid.ExperimentalUuidApi
 
 @ExecuteLast
 class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
@@ -140,7 +141,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         )
 
         var prevFuncDecl : FunctionDeclaration? = findFunctionByName("std::thread::spawn")
-        AuxData.addData(prevFuncDecl?.name?.localName, "test_thread_spawn")
+        AuxData.addData(prevFuncDecl, "test_thread_spawn")
 
         var threadEntryDecl : FunctionDeclaration? = null
         var skipIndex = -1
