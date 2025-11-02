@@ -143,7 +143,6 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         )
 
         var prevFuncDecl : FunctionDeclaration? = findFunctionByName("std::thread::spawn")
-        AuxData.addData(prevFuncDecl, "test_thread_spawn")
 
         var threadEntryDecl : FunctionDeclaration? = null
         var skipIndex = -1
@@ -180,15 +179,13 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 threadEntryDecl = findFunctionByName(prevFuncDecl.calls[0].name.localName, true)
             }
         }
-
-//        AuxData.addData(threadEntryDecl, "thread2")
         assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
 
-        AuxData.addData(threadEntryDecl, "T2")
+        AuxData.addData(threadEntryDecl, "thread", "T2")
 
         fun markNodeWithThread(n: Node) {
             if (test_count >= 1000) return;
-            AuxData.addData(n, "T2")
+            AuxData.addData(n, "thread", "T2")
             test_count++
             for (j in n.nextEOG) {
                 markNodeWithThread(j);

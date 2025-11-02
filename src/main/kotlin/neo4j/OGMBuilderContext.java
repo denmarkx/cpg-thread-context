@@ -38,9 +38,7 @@ public class OGMBuilderContext {
 
     public void auxUpdateProperties(Node n, Map<String, Object> props) {
         if (!hasAuxData(n)) return;
-
-        // TODO: obviously i forgot about the key in the aux data
-        props.put("aux_data", AuxData.getData(cpgObjectMap.get(n.getId())));
+        String[] data = AuxData.getData(cpgObjectMap.get(n.getId()));
+        props.put(data[0], data[1]);
     }
-
 }
