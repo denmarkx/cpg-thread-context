@@ -7,6 +7,7 @@ import de.fraunhofer.aisec.cpg.graph.edges.allEdges
 import de.fraunhofer.aisec.cpg.graph.edges.astEdges
 import de.fraunhofer.aisec.cpg.graph.edges.dataflows
 import de.fraunhofer.aisec.cpg.graph.edges.edges
+import de.fraunhofer.aisec.cpg.graph.functions
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.types.ObjectType
 import de.fraunhofer.aisec.cpg.passes.CompressLLVMPass
@@ -39,7 +40,7 @@ private val packages: Array<String> =
 * is called. this results in a stackoverflow, so I can't create the ogm builders for the entire graph.
 * this is why i picked translateCPGToOGMBuilders out to modify the depth.
 */
-private const val depth = 6;
+private const val depth = 7;
 
 // picked directly from cpg-neo4j/src/main/kotlin/de/fraunhofer/aisec/cpg_vis_neo4j/Application.kt
 fun translateCPGToOGMBuilders(translationResult: TranslationResult): OGMBuilderContext {

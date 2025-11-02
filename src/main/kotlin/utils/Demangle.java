@@ -8,7 +8,7 @@ package utils;
 // - Hashes come before the 'E' whose format is <length><hash>E
 
 public class Demangle {
-    public static String demangle(String s) throws Exception {
+    public static String demangle(String s) {
         String inner = "";
 
         // Strip ZN (or _ZN) and E

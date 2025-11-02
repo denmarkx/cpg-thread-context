@@ -19,6 +19,8 @@ import utils.AuxData
 import utils.Demangle
 import kotlin.uuid.ExperimentalUuidApi
 
+private var test_count = 0
+
 @ExecuteLast
 class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     lateinit var nodes : List<Node>
@@ -181,5 +183,18 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
 //        AuxData.addData(threadEntryDecl, "thread2")
         assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
+
+        AuxData.addData(threadEntryDecl, "T2")
+
+        fun markNodeWithThread(n: Node) {
+            if (test_count >= 1000) return;
+            AuxData.addData(n, "T2")
+            test_count++
+            for (j in n.nextEOG) {
+                markNodeWithThread(j);
+            }
+        }
+        var next = threadEntryDecl?.nextEOG
+        markNodeWithThread(next?.get(0)!!)
     }
 }

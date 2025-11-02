@@ -1,6 +1,5 @@
 package neo4j;
 
-import io.netty.util.concurrent.CompleteFuture;
 import org.neo4j.driver.AuthTokens;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.GraphDatabase;
@@ -10,6 +9,7 @@ import org.neo4j.driver.async.ResultCursor;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder;
 import org.neo4j.ogm.model.Property;
+import utils.Demangle;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -18,6 +18,13 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 public class SessionWrapper {
+    /*
+    * Exporting to N4J on a local machine is too expensive. For testing, I only care about nodes who are in AuxData.
+    */
+    private static final boolean WANT_NODES_WITH_AUX_DATA_ONLY = true;
+    private static final boolean WANT_EOG_ONLY = true;
+
+
     private static Driver driver;
 
     public static Driver getDriver() {
@@ -51,9 +58,17 @@ public class SessionWrapper {
                 }
             }
 
+            if (WANT_NODES_WITH_AUX_DATA_ONLY && !ctx.hasAuxData(node)) return;
+
             Map<String, Object> map = new HashMap<>(node.getPropertyList().size());
             for (Property p : node.getPropertyList()) {
-                map.put((String) p.getKey(), p.getValue());
+                String key = (String)p.getKey();
+                // Demangle name if possible:
+                if (key.equals("name")) {
+                    map.put(key, Demangle.demangle(p.getValue().toString()));
+                    continue;
+                }
+                map.put(key, p.getValue());
             }
             var props = sanitizeProperties(map);
             props.put("cpgId", node.getId());
@@ -84,9 +99,8 @@ public class SessionWrapper {
             var relType = e.getType();
 
             // Filter Edges:
-            if (FilteredInfo.FILTERED_EDGES.contains(relType)) {
-                return;
-            }
+            if (FilteredInfo.FILTERED_EDGES.contains(relType)) return;
+            if (WANT_EOG_ONLY && !Objects.equals(relType, "EOG")) return;
 
             var startId = e.getStartNode();
             var endId = e.getEndNode();
@@ -97,9 +111,7 @@ public class SessionWrapper {
             var props = sanitizeProperties(map);
 
             // TODO: this is because of the depth limit
-            if (startId == null || endId == null) {
-                return;
-            }
+            if (startId == null || endId == null) return;
 
             edgeInfoMap.putIfAbsent(relType, new ArrayList<>());
             edgeInfoMap.get(relType).add(Map.of(
