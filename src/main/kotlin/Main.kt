@@ -3,27 +3,12 @@ import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
 import de.fraunhofer.aisec.cpg.TranslationResult
 import de.fraunhofer.aisec.cpg.frontends.llvm.LLVMIRLanguage
-import de.fraunhofer.aisec.cpg.graph.edges.allEdges
-import de.fraunhofer.aisec.cpg.graph.edges.astEdges
-import de.fraunhofer.aisec.cpg.graph.edges.dataflows
-import de.fraunhofer.aisec.cpg.graph.edges.edges
-import de.fraunhofer.aisec.cpg.graph.functions
-import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.types.ObjectType
-import de.fraunhofer.aisec.cpg.passes.CompressLLVMPass
-import de.fraunhofer.aisec.cpg.passes.SymbolResolver
-import de.fraunhofer.aisec.cpg.passes.TypeHierarchyResolver
-import de.fraunhofer.aisec.cpg.passes.TypeResolver
-import de.fraunhofer.aisec.cpg.persistence.properties
-import de.fraunhofer.aisec.cpg_vis_neo4j.Application
-import de.fraunhofer.aisec.cpg_vis_neo4j.Schema
 import neo4j.OGMBuilderContext
-import neo4j.SessionWrapper
+import neo4j.persistGraph
 import org.neo4j.ogm.context.EntityGraphMapper
 import org.neo4j.ogm.context.MappingContext
 import org.neo4j.ogm.cypher.compiler.CypherContext
 import org.neo4j.ogm.cypher.compiler.MultiStatementCypherCompiler
-import org.neo4j.ogm.cypher.compiler.NodeBuilder
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder
 import org.neo4j.ogm.metadata.MetaData
@@ -31,6 +16,7 @@ import passes.LLVMThreadPass
 import utils.Demangle
 import java.io.File
 
+internal typealias Relationship = Map<String, Any?>
 private val packages: Array<String> =
     arrayOf("de.fraunhofer.aisec.cpg.graph", "de.fraunhofer.aisec.cpg.frontends")
 
@@ -43,43 +29,42 @@ private val packages: Array<String> =
 private const val depth = 7;
 
 // picked directly from cpg-neo4j/src/main/kotlin/de/fraunhofer/aisec/cpg_vis_neo4j/Application.kt
-fun translateCPGToOGMBuilders(translationResult: TranslationResult): OGMBuilderContext {
-    val meta = MetaData(*packages)
-    val con = MappingContext(meta)
-    val entityGraphMapper = EntityGraphMapper(meta, con)
-
-    translationResult.components.map { entityGraphMapper.map(it, depth) }
-//  translationResult.additionalNodes.map { entityGraphMapper.map(it, depth) }
-
-    // I've tried quite a bit to map CPG Node objects -> OGM node objects. Both IDs are expressed
-    // differently which stops this from happening. Perhaps there was someway to derive the long ID from
-    // the UUID, but it wasn't really obvious when looking at the MSB/LSB
-    // ..so I'll just make this accessible, but immutable I suppose.
-    val getCreatedObjectsWithId = CypherContext::class.java.getDeclaredField("createdObjectsWithId")
-    getCreatedObjectsWithId.isAccessible = true
-
-    val compiler = entityGraphMapper.compileContext().compiler
-
-    // get private fields of `CypherCompiler` via reflection
-    val getNewNodeBuilders = MultiStatementCypherCompiler::class.java.getDeclaredField("newNodeBuilders")
-    val getNewRelationshipBuilders =
-            MultiStatementCypherCompiler::class.java.getDeclaredField("newRelationshipBuilders")
-    getNewNodeBuilders.isAccessible = true
-    getNewRelationshipBuilders.isAccessible = true
-
-    // We only need `newNodeBuilders` and `newRelationshipBuilders` as we are "importing" to an
-    // empty "db" and all nodes and relations will be new
-    val newNodeBuilders =
-        (getNewNodeBuilders[compiler] as? ArrayList<*>)?.filterIsInstance<DefaultNodeBuilder>()
-    val newRelationshipBuilders =
-            (getNewRelationshipBuilders[compiler] as? ArrayList<*>)?.filterIsInstance<
-                DefaultRelationshipBuilder
-            >()
-
-    val builderContext = OGMBuilderContext(newNodeBuilders, newRelationshipBuilders)
-    builderContext.setCPGObjectMap(getCreatedObjectsWithId[compiler.context()] as Map<Long, Object>)
-    return builderContext
-}
+//fun translateCPGToOGMBuilders(translationResult: TranslationResult): OGMBuilderContext {
+//    val meta = MetaData(*packages)
+//    val con = MappingContext(meta)
+//    val entityGraphMapper = EntityGraphMapper(meta, con)
+//
+//    translationResult.components.map { entityGraphMapper.map(it, depth) }
+////  translationResult.additionalNodes.map { entityGraphMapper.map(it, depth) }
+//
+//    // I've tried quite a bit to map CPG Node objects -> OGM node objects. Both IDs are expressed
+//    // differently which stops this from happening. Perhaps there was someway to derive the long ID from
+//    // the UUID, but it wasn't really obvious when looking at the MSB/LSB
+//    // ..so I'll just make this accessible, but immutable I suppose.
+//    val getCreatedObjectsWithId = CypherContext::class.java.getDeclaredField("createdObjectsWithId")
+//    getCreatedObjectsWithId.isAccessible = true
+//
+//    val compiler = entityGraphMapper.compileContext().compiler
+//
+//    // get private fields of `CypherCompiler` via reflection
+//    val getNewNodeBuilders = MultiStatementCypherCompiler::class.java.getDeclaredField("newNodeBuilders")
+//    val getNewRelationshipBuilders =
+//            MultiStatementCypherCompiler::class.java.getDeclaredField("newRelationshipBuilders")
+//    getNewNodeBuilders.isAccessible = true
+//    getNewRelationshipBuilders.isAccessible = true
+//
+//    // We only need `newNodeBuilders` and `newRelationshipBuilders` as we are "importing" to an
+//    // empty "db" and all nodes and relations will be new
+//    val newNodeBuilders =
+//        (getNewNodeBuilders[compiler] as? ArrayList<*>)?.filterIsInstance<DefaultNodeBuilder>()
+//    val newRelationshipBuilders =
+//            (getNewRelationshipBuilders[compiler] as? ArrayList<*>)?.filterIsInstance<
+//                DefaultRelationshipBuilder
+//            >()
+//
+////    val builderContext = OGMBuilderContext(newNodeBuilders, newRelationshipBuilders)
+////    builderContext.setCPGObjectMap(getCreatedObjectsWithId[compiler.context()] as Map<Long, Object>)
+//}
 
 fun main() {
     val file = File("main.ll")
@@ -116,6 +101,11 @@ fun main() {
         .analyze()
         .get()
 
-    val test = translateCPGToOGMBuilders(result)
-    SessionWrapper.persistGraph(test)
+    val t = System.currentTimeMillis()
+    result.persistGraph()
+    println(System.currentTimeMillis() - t)
+
+//    val test = translateCPGToOGMBuilders(result)
+//    SessionWrapper.persistGraph(test)
 }
+

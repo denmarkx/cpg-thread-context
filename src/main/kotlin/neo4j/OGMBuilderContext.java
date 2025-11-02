@@ -1,8 +1,8 @@
 package neo4j;
 
+import de.fraunhofer.aisec.cpg.graph.Node;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder;
-import org.neo4j.ogm.model.Node;
 import utils.AuxData;
 
 import java.util.HashMap;
@@ -18,11 +18,12 @@ import java.util.Map;
  * TranslationResult even got built.
 */
 public class OGMBuilderContext {
-    public List<DefaultNodeBuilder> nodes;
-    public List<DefaultRelationshipBuilder> edges;
+    public List<Node> nodes;
+
+    public List<Map<String, Object>> edges;
     private Map<Long, Object> cpgObjectMap;
 
-    public OGMBuilderContext(List<DefaultNodeBuilder> nodes, List<DefaultRelationshipBuilder> edges) {
+    public OGMBuilderContext(List<Node> nodes, List<Map<String, Object>> edges) {
         this.nodes = nodes;
         this.edges = edges;
         this.cpgObjectMap = new HashMap<>();
