@@ -39,7 +39,7 @@ private val packages: Array<String> =
 * is called. this results in a stackoverflow, so I can't create the ogm builders for the entire graph.
 * this is why i picked translateCPGToOGMBuilders out to modify the depth.
 */
-private const val depth = 5;
+private const val depth = 6;
 
 // picked directly from cpg-neo4j/src/main/kotlin/de/fraunhofer/aisec/cpg_vis_neo4j/Application.kt
 fun translateCPGToOGMBuilders(translationResult: TranslationResult): OGMBuilderContext {
