@@ -1,14 +1,20 @@
 package neo4j;
 
+import io.netty.util.concurrent.CompleteFuture;
 import org.neo4j.driver.AuthTokens;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.GraphDatabase;
 import org.neo4j.driver.SessionConfig;
+import org.neo4j.driver.async.AsyncSession;
+import org.neo4j.driver.async.ResultCursor;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultNodeBuilder;
 import org.neo4j.ogm.cypher.compiler.builders.node.DefaultRelationshipBuilder;
 import org.neo4j.ogm.model.Property;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 public class SessionWrapper {
@@ -28,52 +34,100 @@ public class SessionWrapper {
         if (driver == null) getDriver();
         driver.executableQuery("MATCH (n) DETACH DELETE n").execute();
 
-        var session = driver.session(SessionConfig.builder().withDatabase("neo4j").build());
-        session.executeWriteWithoutResult(tx -> {
-            // Nodes:
-            nodeBuilders.forEach(b -> {
-                var node = b.node();
-                var labels = node.getLabels();
-                Map<String, Object> map = new HashMap<>(node.getPropertyList().size());
-                for (Property p : node.getPropertyList()) {
-                    map.put((String) p.getKey(), p.getValue());
-                }
-                var props = sanitizeProperties(map);
-                props.put("cpgId", node.getId());
-                ctx.auxUpdateProperties(node, props);
-                tx.run("CREATE (n:" +String.join(":", labels) + ") SET n=$props", Map.of("props", props));
-            });
+        var session = driver.session(AsyncSession.class, SessionConfig.builder().withDatabase("neo4j").build());
 
-            // Edges:
-            edgeBuilder.forEach(b -> {
-                var e = b.edge();
-                var relType = e.getType();
-                var startId = e.getStartNode();
-                var endId = e.getEndNode();
-                Map<String, Object> map = new HashMap<>(e.getPropertyList().size());
-                for (Property p : e.getPropertyList()) {
-                    map.put((String) p.getKey(), p.getValue());
-                }
-                var props = sanitizeProperties(map);
+        // Labels -> props
+        Map<String, List<Object>> labelPropMap = new HashMap<>();
 
-                var query = """
-                    MATCH (start {cpgId: %s})
-                    MATCH (end {cpgId:%s})
-                    CREATE (start)-[r:%s]->(end)
-                    SET r=$props
-                """.stripIndent();
-                query = String.format(query, startId, endId, relType);
+        // Nodes:
+        nodeBuilders.forEach(b -> {
+            var node = b.node();
+            var labels = node.getLabels();
 
-                // TODO: this is because of the depth limit
-                if (startId == null || endId == null) {
+            // Filter Nodes:
+            for (String l : labels) {
+                if (FilteredInfo.FILTERED_NODES.contains(l)) {
                     return;
                 }
+            }
 
-                tx.run(query, Map.of(
-                    "props", props
-                ));
-            });
+            Map<String, Object> map = new HashMap<>(node.getPropertyList().size());
+            for (Property p : node.getPropertyList()) {
+                map.put((String) p.getKey(), p.getValue());
+            }
+            var props = sanitizeProperties(map);
+            props.put("cpgId", node.getId());
+            ctx.auxUpdateProperties(node, props);
+            labelPropMap.putIfAbsent(String.join(":", labels), new ArrayList<>());
+            labelPropMap.get(String.join(":", labels)).add(props);
         });
+
+        List<CompletableFuture<ResultCursor>> nodeFutures = new ArrayList<>();
+        labelPropMap.forEach((k, v) -> {
+            nodeFutures.add(
+                session.runAsync("UNWIND $props AS m CREATE (n:" + k + ") SET n=m", Map.of("props", v)).toCompletableFuture()
+            );
+        });
+
+        // Blocking until all node commits are done:
+        CompletableFuture.allOf(nodeFutures.toArray(new CompletableFuture[0])).join();
+
+        // Edge -> [startId, endId, props]
+        Map<String, List<Object>> edgeInfoMap = new HashMap<>();
+
+        ExecutorService executor = Executors.newFixedThreadPool(6);
+        List<CompletableFuture<ResultCursor>> edgeFutures = new ArrayList<>();
+
+        // Edges:
+        edgeBuilder.forEach(b -> {
+            var e = b.edge();
+            var relType = e.getType();
+
+            // Filter Edges:
+            if (FilteredInfo.FILTERED_EDGES.contains(relType)) {
+                return;
+            }
+
+            var startId = e.getStartNode();
+            var endId = e.getEndNode();
+            Map<String, Object> map = new HashMap<>(e.getPropertyList().size());
+            for (Property p : e.getPropertyList()) {
+                map.put((String) p.getKey(), p.getValue());
+            }
+            var props = sanitizeProperties(map);
+
+            // TODO: this is because of the depth limit
+            if (startId == null || endId == null) {
+                return;
+            }
+
+            edgeInfoMap.putIfAbsent(relType, new ArrayList<>());
+            edgeInfoMap.get(relType).add(Map.of(
+                "startId", startId,
+                "endId", endId,
+                "props", props
+            ));
+        });
+
+        var query = """
+              UNWIND $info AS row
+              MATCH (start {cpgId: row.startId})
+              MATCH (end {cpgId: row.endId})
+              CREATE (start)-[r:%s]->(end)
+              SET r=row.props
+        """.stripIndent();
+
+        edgeInfoMap.forEach((k, v) -> {
+            for (int i = 0; i < v.size(); i += 1000) {
+                var batch = v.subList(i, Math.min(i + 1000, v.size()));
+                edgeFutures.add(CompletableFuture.supplyAsync(() ->
+                    driver.asyncSession().runAsync(String.format(query, k), Map.of("info", batch)).toCompletableFuture().join(), executor));
+            }
+        });
+
+        // Blocking until all node commits are done:
+        CompletableFuture.allOf(edgeFutures.toArray(new CompletableFuture[0])).join();
+        executor.shutdown();
     }
 
     public static Map<String, Object> sanitizeProperties(Map<String, Object> raw) {
