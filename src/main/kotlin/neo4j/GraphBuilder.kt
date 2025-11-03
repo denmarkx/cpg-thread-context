@@ -1,4 +1,4 @@
-  package neo4j
+package neo4j
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.persistence.labels
@@ -9,6 +9,8 @@ import org.neo4j.driver.GraphDatabase
 import org.neo4j.driver.SessionConfig
 import org.neo4j.driver.async.AsyncSession
 import org.neo4j.driver.async.ResultCursor
+import utils.AuxData
+import utils.Demangle
 import utils.NodeIDMap
 import java.util.concurrent.CompletableFuture
 
@@ -20,30 +22,43 @@ fun getDriver() {
     driver?.verifyConnectivity()
 }
 
-fun persistGraph(ctx: OGMBuilderContext) {
+fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
     getDriver()
     driver!!.executableQuery("CALL apoc.periodic.iterate(\"MATCH (n) RETURN n\", \"DETACH DELETE n\", {batchSize:1000})").execute()
 
     val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("neo4j").build())
-    persistNodes(session, ctx.nodes)
+    persistNodes(session, nodes)
 
     // Prior to persisting edges, nodes are given an index:
     driver!!.executableQuery("CREATE INDEX IF NOT EXISTS FOR (n:Node) ON (n.id)").execute()
-    persistEdges(session, ctx.edges)
+    persistEdges(session, edges)
 }
 
 private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
     // String (Joined Labels) -> PropertyMap
     val nodeMapInfo: MutableMap<String, MutableList<Map<String, Any?>>> = HashMap()
-    nodes.forEach {
-        val k = it::class.labels.joinToString(":")
-        nodeMapInfo.putIfAbsent(k, mutableListOf())
 
-        // See utils/NodeIDMap for why we have to override the CPG ID.
-        val props = it.properties().toMutableMap()
-        props["id"] = NodeIDMap.getID(it)
-        nodeMapInfo[k]?.add(props)
-    }
+    nodes.filter {
+        // Filter nodes out (FilterInfo.FILTERED_NODES)
+        it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } }
+        .forEach {
+            val k = it::class.labels.joinToString(":")
+            nodeMapInfo.putIfAbsent(k, mutableListOf())
+
+            // See utils/NodeIDMap for why we have to override the CPG ID.
+            val props = it.properties().toMutableMap()
+            props["id"] = NodeIDMap.getID(it)
+
+            // Demangle names:
+            props["name"] = Demangle.demangle(props["name"] as String)
+
+            // Auxiliary Data
+            if (AuxData.hasData(it)) {
+                props += AuxData.getData(it)
+            }
+
+            nodeMapInfo[k]?.add(props)
+        }
 
     // Calling runAsync and storing the futures before moving to edges:
     val nodeFutures: MutableList<CompletableFuture<ResultCursor>> = ArrayList()
@@ -92,15 +107,16 @@ private fun persistEdges(session: AsyncSession, edges: List<Relationship>) {
         SET r=row.props
     """.trimIndent()
 
-    edgeMapInfo.forEach {
-        if (it.key == "LANGUAGE") return@forEach
-        it.value.chunked(700).forEach { b ->
-            edgeFutures.add(
-                session.runAsync(edgeCreateCypher.format(it.key), mapOf("info" to b))
-                    .toCompletableFuture()
-            )
+    edgeMapInfo
+        .filter { !FilteredInfo.FILTERED_EDGES.contains(it.key) }
+        .forEach {
+            it.value.chunked(700).forEach { b ->
+                edgeFutures.add(
+                    session.runAsync(edgeCreateCypher.format(it.key), mapOf("info" to b))
+                        .toCompletableFuture()
+                )
+            }
         }
-    }
 
     // Block until all edge commits are finished:
     CompletableFuture.allOf(*edgeFutures.toTypedArray()).join()

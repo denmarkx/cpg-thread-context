@@ -94,9 +94,7 @@ fun TranslationResult.persistGraph() {
 
     val relationships = nodes.collectRelationships()
     log.info("Persisting {} relationships", relationships.size)
-
-    var ctx = OGMBuilderContext(nodes, relationships);
-    persistGraph(ctx)
+    persistGraph(nodes, relationships)
 }
 
 /**

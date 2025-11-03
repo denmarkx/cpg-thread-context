@@ -17,7 +17,6 @@ public class FilteredInfo {
     public static List<String> FILTERED_EDGES = List.of(
         "ASSIGNED_TYPES",
         "CANDIDATES",
-        "DFG",
         "LANGUAGE",
         "TYPE",
         "TYPE_OBSERVERS"
