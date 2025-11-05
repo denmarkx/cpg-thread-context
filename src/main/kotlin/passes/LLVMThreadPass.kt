@@ -17,6 +17,7 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import utils.AuxData
 import utils.Demangle
+import utils.EdgeData
 import kotlin.uuid.ExperimentalUuidApi
 
 private var test_count = 0
@@ -181,6 +182,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         }
         assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
 
+        EdgeData.connectNodes(findFunctionByName("std::thread::spawn"), threadEntryDecl, "THREAD_ENTRY")
         AuxData.addData(threadEntryDecl, "thread", "T2")
 
         fun markNodeWithThread(n: Node) {

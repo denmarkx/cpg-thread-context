@@ -29,6 +29,7 @@ import de.fraunhofer.aisec.cpg.persistence.properties
 import de.fraunhofer.aisec.cpg.persistence.schemaRelationships
 import org.neo4j.driver.Session
 import org.slf4j.LoggerFactory
+import utils.EdgeData
 import utils.NodeIDMap
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -122,6 +123,19 @@ val Persistable.connectedNodes: IdentitySet<Node>
 @OptIn(ExperimentalUuidApi::class)
 private fun List<Node>.collectRelationships(): List<Relationship> {
     val relationships = mutableListOf<Relationship>()
+
+    // EdgeData:
+    EdgeData.getEdges().forEach {
+        it.value.forEach { v ->
+            relationships += mapOf(
+                "startId" to NodeIDMap.getID(v.start()),
+                "endId" to NodeIDMap.getID(v.end()),
+                "type" to it.key
+            )
+        }
+    }
+
+    println(relationships)
 
     for (node in this) {
         for (entry in node::class.schemaRelationships) {
