@@ -143,7 +143,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             "std::sys_common::backtrace::__rust_begin_short_backtrace",
         )
 
-        var prevFuncDecl : FunctionDeclaration? = findFunctionByName("std::thread::spawn")
+        var prevFuncDecl: FunctionDeclaration? = findFunctionByName("std::thread::spawn") ?: return
 
         var threadEntryDecl : FunctionDeclaration? = null
         var skipIndex = -1
