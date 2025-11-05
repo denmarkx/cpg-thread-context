@@ -11,6 +11,7 @@ import org.neo4j.driver.async.AsyncSession
 import org.neo4j.driver.async.ResultCursor
 import utils.AuxData
 import utils.Demangle
+import utils.LabelData
 import utils.NodeIDMap
 import java.util.concurrent.CompletableFuture
 
@@ -42,7 +43,8 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
         it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } }
         .forEach {
-            val k = it::class.labels.joinToString(":")
+            val allLabels = it::class.labels + LabelData.getLabels(it);
+            val k = allLabels.joinToString(":")
             nodeMapInfo.putIfAbsent(k, mutableListOf())
 
             // See utils/NodeIDMap for why we have to override the CPG ID.

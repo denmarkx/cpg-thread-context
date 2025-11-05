@@ -8,6 +8,7 @@ import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
@@ -15,9 +16,12 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
+import graph.findCallByName
 import utils.AuxData
 import utils.Demangle
 import utils.EdgeData
+import utils.LabelData
+import java.sql.Ref
 import kotlin.uuid.ExperimentalUuidApi
 
 private var test_count = 0
@@ -127,6 +131,15 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
     override fun accept(t: TranslationUnitDeclaration) {
         nodes = SubgraphWalker.flattenAST(t)
+
+        // The main thread is different and always starts from std::rt::lang_start
+        // https://stdrs.dev/nightly/x86_64-unknown-linux-gnu/src/std/rt.rs.html#159-172
+        val entryCallExpr = findCallByName(nodes, "std::rt::lang_start") ?: return
+
+        // only care about that first function: lang_start(main: fn() -> T, ...)
+        // though the rest are argc, argv, and sigpipe.
+        val main = (entryCallExpr.arguments[0] as Reference).refersTo as FunctionDeclaration
+        LabelData.addLabel(main, "MainFunctionDeclaration")
 
         // TODO: this only handles 1 thread spawn
         val threadSpawnFlow = arrayOf(
