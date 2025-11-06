@@ -26,6 +26,20 @@ import kotlin.uuid.ExperimentalUuidApi
 
 private var test_count = 0
 
+val threadSpawnFlow = arrayOf(
+    "std::thread::Builder::spawn",
+    "std::thread::Builder::spawn_unchecked",
+    "vtable",
+    "std::thread::Builder::spawn_unchecked::{{closure}}",
+    "std::panic::catch_unwind",
+    "std::panicking::try",
+    "__rust_try",
+    "std::panicking::try::do_call",
+    "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once",
+    "std::thread::Builder::spawn_unchecked::{{closure}}::{{closure}}",
+    "std::sys_common::backtrace::__rust_begin_short_backtrace",
+)
+
 @ExecuteLast
 class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     lateinit var nodes : List<Node>
@@ -141,72 +155,77 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         val main = (entryCallExpr.arguments[0] as Reference).refersTo as FunctionDeclaration
         LabelData.addLabel(main, "MainFunctionDeclaration")
 
-        // TODO: this only handles 1 thread spawn
-        val threadSpawnFlow = arrayOf(
-            "std::thread::Builder::spawn",
-            "std::thread::Builder::spawn_unchecked",
-            "vtable",
-            "std::thread::Builder::spawn_unchecked::{{closure}}",
-            "std::panic::catch_unwind",
-            "std::panicking::try",
-            "__rust_try",
-            "std::panicking::try::do_call",
-            "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once",
-            "std::thread::Builder::spawn_unchecked::{{closure}}::{{closure}}",
-            "std::sys_common::backtrace::__rust_begin_short_backtrace",
-        )
+        // From the entry, traverse the CALLS within until we find std::thread::spawn.
+        // TODO: need a debug parser pass so that i can know when a thread is spawned from the user code
+        // instead of internally from within rust (and also so we know what to branch out to from here)
+        for (c in main.calls) {
+            if (Demangle.demangle(c.name.localName) == "std::thread::spawn") {
+                // c.name matches to a name within the IR, but
+                // the mangled suffix contains the hash which is important
+                var prevFuncDecl = findFunctionByName(c.name.localName, exactName = true)
+                LabelData.addLabel(prevFuncDecl, "ThreadStartDeclaration")
 
-        var prevFuncDecl: FunctionDeclaration? = findFunctionByName("std::thread::spawn") ?: return
+                // Thread spawned from main
+                EdgeData.connectNodes(main, prevFuncDecl, "THREAD_SPAWN")
+                var threadEntryDecl : FunctionDeclaration? = null
+                var skipIndex = -1
 
-        var threadEntryDecl : FunctionDeclaration? = null
-        var skipIndex = -1
+                for ((i, funcName) in threadSpawnFlow.withIndex()) {
+                    if (skipIndex == i) continue
 
-        for ((i, funcName) in threadSpawnFlow.withIndex()) {
-            if (skipIndex == i) continue
+                    // vtables are handled differently:
+                    if (funcName == "vtable") {
+                        val table = findVTableWithinBlocks(prevFuncDecl.blocks)
 
-            // vtables are handled differently:
-            if (funcName == "vtable") {
-                val table = findVTableWithinBlocks(prevFuncDecl.blocks)
+                        // The prevFuncDecl becomes the shim:
+                        prevFuncDecl = getVTableShim(table)
+                        continue
+                    }
 
-                // The prevFuncDecl becomes the shim:
-                prevFuncDecl = getVTableShim(table)
-                continue
-            }
+                    // Rust builtins are handled differently as well:
+                    if (funcName.startsWith("__rust_")) {
+                        // If we're given a builtin, this means that the given parameters are a function pointer that we need.
+                        val builtinCall = findCallWithinBlocks(prevFuncDecl.blocks, funcName)
 
-            // Rust builtins are handled differently as well:
-            if (funcName.startsWith("__rust_")) {
-                // If we're given a builtin, this means that the given parameters are a function pointer that we need.
-                val builtinCall = findCallWithinBlocks(prevFuncDecl.blocks, funcName)
+                        // In a general case, it will be whoever is next in the list.
+                        prevFuncDecl = findFunctionWithinCallParams(builtinCall, threadSpawnFlow[i+1])
 
-                // In a general case, it will be whoever is next in the list.
-                prevFuncDecl = findFunctionWithinCallParams(builtinCall, threadSpawnFlow[i+1])
+                        // Then skip the next index:
+                        skipIndex = i+1
+                        continue
+                    }
 
-                // Then skip the next index:
-                skipIndex = i+1
-                continue
-            }
+                    prevFuncDecl = findFunctionWithinBlocks(prevFuncDecl.blocks, funcName)
 
-            prevFuncDecl = findFunctionWithinBlocks(prevFuncDecl.blocks, funcName)
+                    // If we're at the end (thread-spawn chains only), the next immediate call is the entry point for thread 2.
+                    if (i == threadSpawnFlow.size - 1) {
+                        // the next immediate call that is NOT llvm.dbg
+                        threadEntryDecl = findFunctionByName(
+                            prevFuncDecl.calls.filter {
+                                !it.name.localName.startsWith("llvm.dbg")
+                            }[0].name.localName,
+                            true)
+                    }
+                }
 
-            // If we're at the end (thread-spawn chains only), the next immediate call is the entry point for thread 2.
-            if (i == threadSpawnFlow.size - 1) {
-                threadEntryDecl = findFunctionByName(prevFuncDecl.calls[0].name.localName, true)
-            }
-        }
-        assert(Demangle.demangle(threadEntryDecl?.name?.localName) == "main::main::{{closure}}")
-
-        EdgeData.connectNodes(findFunctionByName("std::thread::spawn"), threadEntryDecl, "THREAD_ENTRY")
-        AuxData.addData(threadEntryDecl, "thread", "T2")
-
-        fun markNodeWithThread(n: Node) {
-            if (test_count >= 1000) return;
-            AuxData.addData(n, "thread", "T2")
-            test_count++
-            for (j in n.nextEOG) {
-                markNodeWithThread(j);
+                EdgeData.connectNodes(
+                    findFunctionByName(c.name.localName, exactName = true),
+                    threadEntryDecl,
+                    "THREAD_ENTRY"
+                )
+                AuxData.addData(threadEntryDecl, "thread", "T")
             }
         }
-        var next = threadEntryDecl?.nextEOG
-        markNodeWithThread(next?.get(0)!!)
+
+//        fun markNodeWithThread(n: Node) {
+//            if (test_count >= 1000) return;
+//            AuxData.addData(n, "thread", "T2")
+//            test_count++
+//            for (j in n.nextEOG) {
+//                markNodeWithThread(j);
+//            }
+//        }
+//        var next = threadEntryDecl?.nextEOG
+//        markNodeWithThread(next?.get(0)!!)
     }
 }
