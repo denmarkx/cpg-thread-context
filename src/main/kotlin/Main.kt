@@ -1,13 +1,7 @@
 import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
-import de.fraunhofer.aisec.cpg.frontends.llvm.LLVMIRLanguage
-import de.fraunhofer.aisec.cpg.graph.AccessValues
-import de.fraunhofer.aisec.cpg.graph.edges.astEdges
-import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.AssignExpression
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
+import language.LLVMIRLanguage
 import passes.LLVMThreadPass
 import neo4j.persistGraph
 import passes.MemorySpacePass
@@ -53,7 +47,7 @@ fun main() {
         .get()
 
     val t = System.currentTimeMillis()
-    result.persistGraph()
+//    result.persistGraph()
     println(System.currentTimeMillis() - t)
 }
 
