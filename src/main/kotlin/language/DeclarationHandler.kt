@@ -50,7 +50,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
     }
 
     private fun handleValue(value: LLVMValueRef): Declaration {
-        return when (val kind = LLVMGetValueKind((value))) {
+        val declaration = when (val kind = LLVMGetValueKind((value))) {
             LLVMFunctionValueKind -> handleFunction(value)
             LLVMGlobalVariableValueKind -> handleGlobal(value)
             else -> {
@@ -62,6 +62,8 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
+        declaration.applyMetadataExt(value)
+        return declaration
     }
 
     /**

@@ -50,7 +50,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
     }
 
     private fun handleValue(value: LLVMValueRef): Expression {
-        return when (val kind = LLVMGetValueKind(value)) {
+        val expression = when (val kind = LLVMGetValueKind(value)) {
             LLVMConstantExprValueKind -> handleConstantExprValueKind(value)
             LLVMConstantArrayValueKind,
             LLVMConstantStructValueKind -> handleConstantStructValue(value)
@@ -114,6 +114,8 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 }
             }
         }
+        expression.applyMetadataExt(value)
+        return expression
     }
 
     /** Returns a [Reference] for a function (pointer). */

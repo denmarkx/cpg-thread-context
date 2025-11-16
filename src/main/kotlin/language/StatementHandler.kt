@@ -42,6 +42,7 @@ import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
+import java.nio.IntBuffer
 
 class StatementHandler(lang: LLVMIRLanguageFrontend) :
     Handler<Statement, Pointer, LLVMIRLanguageFrontend>(::ProblemExpression, lang) {
@@ -65,12 +66,16 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
      */
     private fun handleInstruction(instr: LLVMValueRef): Statement {
         if (LLVMIsABinaryOperator(instr) != null) {
-            return handleBinaryInstruction(instr)
+            val instruction = handleBinaryInstruction(instr)
+            instruction.applyMetadataExt(instr)
+            return instruction
         } else if (LLVMIsACastInst(instr) != null) {
-            return declarationOrNot(frontend.expressionHandler.handleCastInstruction(instr), instr)
+            val instruction = declarationOrNot(frontend.expressionHandler.handleCastInstruction(instr), instr)
+            instruction.applyMetadataExt(instr)
+            return instruction
         }
 
-        return when (val opcode = instr.opCode) {
+        val instruction = when (val opcode = instr.opCode) {
             LLVMRet -> {
                 val ret = newReturnStatement(rawNode = instr)
 
@@ -224,6 +229,8 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
+        instruction.applyMetadataExt(instr)
+        return instruction
     }
 
     /**
