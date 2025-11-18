@@ -11,6 +11,8 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
 import graph.findCallByName
 import utils.Demangle
+import utils.MetadataType
+import utils.getMetadata
 
 @ExecuteLate
 class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
@@ -30,8 +32,13 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         val nodes = SubgraphWalker.flattenAST(t)
 
         // First, we are interested in memory that is freed.
-        for (freeCallExpr in nodes.filter { isFreeCallIdentifier(it) }) {
+        for (freeCallExpr in nodes.filter {
+            isFreeCallIdentifier(it) &&
+                    getMetadata(it, MetadataType.M_METADATA_HAS_FUNCLET_INFO) == null
+        }) {
             val call = freeCallExpr as CallExpression
+
+            // Ignore those with catchpads.
 
             // TODO: there are 3 callexpressions to drop_in_place when there should be 2.
             // i dont find landing pads / catch / funclets necessary, perhaps they can be stopped.
@@ -44,7 +51,6 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             // additionally, there is no way (atm) to know the specific attributes of this line
             // although we can parse the code or hijack it within the language package
             // call void @"......"(i32** %b) #9 [ "funclet"(token %cleanuppad) ], !dbg !153
-            println(freeCallExpr.code)
             call.arguments.forEach {
                 println(call)
                 println("\t" + it)
