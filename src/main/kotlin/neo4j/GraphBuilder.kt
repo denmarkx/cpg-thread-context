@@ -13,6 +13,7 @@ import utils.Demangle
 import graph.getID
 import graph.getLabels
 import graph.getProperties
+import graph.isScheduledDeletion
 import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null
@@ -41,7 +42,13 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
 
     nodes.filter {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
-        it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } }
+        it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } &&
+
+        // Filter nodes out that were scheduled for deletion:
+        !isScheduledDeletion(it)
+    }
+
+
         .forEach {
             val allLabels = it::class.labels + getLabels(it);
             val k = allLabels.joinToString(":")
@@ -58,6 +65,7 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
             props += getProperties(it)
             nodeMapInfo[k]?.add(props)
         }
+
 
     // Calling runAsync and storing the futures before moving to edges:
     val nodeFutures: MutableList<CompletableFuture<ResultCursor>> = ArrayList()

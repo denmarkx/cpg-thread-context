@@ -1,6 +1,9 @@
 package graph
 
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.ast
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import utils.Demangle
 
@@ -19,4 +22,16 @@ fun findCallByName(nodes: List<Node>, name: String, exactName: Boolean = false):
                 it.name.localName == name
             })
         }
-}
+    }
+
+    /*
+     * From a block, traverse upwards to the FunctionDeclaration.
+    */
+    fun getFunctionDeclarationFromBlock(block: Block) : FunctionDeclaration? {
+        fun traverse(node: Node?): FunctionDeclaration? {
+            if (node == null) return null
+            if (node is FunctionDeclaration) return node
+            return traverse(node.astParent)
+        }
+        return traverse(block.astParent)
+    }

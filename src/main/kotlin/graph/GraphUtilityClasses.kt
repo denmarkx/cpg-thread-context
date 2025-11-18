@@ -11,4 +11,5 @@ class NodeData {
     val labelData: MutableSet<String> = mutableSetOf()
     val propertyData: MutableMap<String, String> = mutableMapOf()
     val id: UUID = UUID.randomUUID()
+    var deleteScheduled: Boolean = false
 }

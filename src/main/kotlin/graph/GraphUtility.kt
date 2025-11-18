@@ -6,6 +6,26 @@ data class Relationship(val start: Node, val end: Node)
 private val nodeData: MutableMap<Node, NodeData> = mutableMapOf()
 private val edgeData: MutableMap<String, MutableSet<Relationship>> = mutableMapOf()
 
+/*
+==========================================
+ * NODES
+==========================================
+*/
+fun scheduleDeletion(node: Node) {
+    registerNode(node)
+    nodeData[node]!!.deleteScheduled = true
+}
+
+fun scheduleDeletion(nodes: List<Node>) {
+    nodes.forEach {
+        registerNode(it)
+        nodeData[it]!!.deleteScheduled = true
+    }
+}
+
+fun isScheduledDeletion(node: Node) : Boolean {
+    return nodeData[node]?.deleteScheduled == true
+}
 
 /*
 ==========================================
