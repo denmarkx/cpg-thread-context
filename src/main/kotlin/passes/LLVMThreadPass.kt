@@ -8,7 +8,6 @@ import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
@@ -17,12 +16,10 @@ import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import graph.findCallByName
-import utils.AuxData
 import utils.Demangle
 import utils.EdgeData
-import utils.LabelData
-import java.sql.Ref
-import kotlin.uuid.ExperimentalUuidApi
+import utils.addLabel
+import utils.setProperty
 
 private var test_count = 0
 
@@ -153,7 +150,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         // only care about that first function: lang_start(main: fn() -> T, ...)
         // though the rest are argc, argv, and sigpipe.
         val main = (entryCallExpr.arguments[0] as Reference).refersTo as FunctionDeclaration
-        LabelData.addLabel(main, "MainFunctionDeclaration")
+        addLabel(main, "MainFunctionDeclaration")
 
         // From the entry, traverse the CALLS within until we find std::thread::spawn.
         // TODO: need a debug parser pass so that i can know when a thread is spawned from the user code
@@ -163,7 +160,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 // c.name matches to a name within the IR, but
                 // the mangled suffix contains the hash which is important
                 var prevFuncDecl = findFunctionByName(c.name.localName, exactName = true)
-                LabelData.addLabel(prevFuncDecl, "ThreadStartDeclaration")
+                addLabel(prevFuncDecl!!, "ThreadStartDeclaration")
 
                 // Thread spawned from main
                 EdgeData.connectNodes(main, prevFuncDecl, "THREAD_SPAWN")
@@ -213,7 +210,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     threadEntryDecl,
                     "THREAD_ENTRY"
                 )
-                AuxData.addData(threadEntryDecl, "thread", "T")
+                setProperty(threadEntryDecl!!, "thread", "T")
             }
         }
 

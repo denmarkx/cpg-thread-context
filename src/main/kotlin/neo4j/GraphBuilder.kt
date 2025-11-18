@@ -9,10 +9,10 @@ import org.neo4j.driver.GraphDatabase
 import org.neo4j.driver.SessionConfig
 import org.neo4j.driver.async.AsyncSession
 import org.neo4j.driver.async.ResultCursor
-import utils.AuxData
 import utils.Demangle
-import utils.LabelData
-import utils.NodeIDMap
+import utils.getID
+import utils.getLabels
+import utils.getProperties
 import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null
@@ -43,22 +43,19 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
         it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } }
         .forEach {
-            val allLabels = it::class.labels + LabelData.getLabels(it);
+            val allLabels = it::class.labels + getLabels(it);
             val k = allLabels.joinToString(":")
             nodeMapInfo.putIfAbsent(k, mutableListOf())
 
             // See utils/NodeIDMap for why we have to override the CPG ID.
             val props = it.properties().toMutableMap()
-            props["id"] = NodeIDMap.getID(it)
+            props["id"] = getID(it)
 
             // Demangle names:
             props["name"] = Demangle.demangle(props["name"] as String)
 
             // Auxiliary Data
-            if (AuxData.hasData(it)) {
-                props += AuxData.getData(it)
-            }
-
+            props += getProperties(it)
             nodeMapInfo[k]?.add(props)
         }
 

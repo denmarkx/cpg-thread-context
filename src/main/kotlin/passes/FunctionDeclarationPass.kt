@@ -5,11 +5,10 @@ import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.refs
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
-import utils.AuxData
+import utils.setProperty
 
 /*
  * The "code" property on most of the FunctionDeclaration nodes are incorrect.
@@ -37,7 +36,7 @@ class FunctionDeclarationPass(ctx: TranslationContext) : TranslationUnitPass(ctx
             code = code.split("\n")[1]
         }
 
-        AuxData.addData(node, "code", code)
+        setProperty(node, "code", code!!)
     }
 
     override fun accept(t: TranslationUnitDeclaration) {

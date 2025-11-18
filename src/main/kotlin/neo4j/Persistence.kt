@@ -30,7 +30,7 @@ import de.fraunhofer.aisec.cpg.persistence.schemaRelationships
 import org.neo4j.driver.Session
 import org.slf4j.LoggerFactory
 import utils.EdgeData
-import utils.NodeIDMap
+import utils.getID
 import kotlin.uuid.ExperimentalUuidApi
 
 /**
@@ -82,9 +82,6 @@ fun TranslationResult.persistGraph() {
     val connected = astNodes.flatMap { it.connectedNodes }.toSet()
     val nodes = (astNodes + connected).distinct()
 
-    // Contrary to the actual name, Node.id is NOT UNIQUE.
-    nodes.forEach { NodeIDMap.register(it) }
-
     log.info(
         "Persisting {} nodes: AST nodes ({}), other nodes ({})",
         nodes.size,
@@ -128,8 +125,8 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
     EdgeData.getEdges().forEach {
         it.value.forEach { v ->
             relationships += mapOf(
-                "startId" to NodeIDMap.getID(v.start()),
-                "endId" to NodeIDMap.getID(v.end()),
+                "startId" to getID(v.start()),
+                "endId" to getID(v.end()),
                 "type" to it.key
             )
         }
@@ -144,8 +141,8 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
                 relationships +=
                     value.map { edge ->
                         mapOf(
-                            "startId" to NodeIDMap.getID(edge.start),
-                            "endId" to  NodeIDMap.getID(edge.end),
+                            "startId" to getID(edge.start),
+                            "endId" to  getID(edge.end),
                             "type" to entry.key,
                         ) + edge.properties()
                     }
@@ -153,16 +150,16 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
                 relationships +=
                     value.filterIsInstance<Node>().map { end ->
                         mapOf(
-                            "startId" to  NodeIDMap.getID(node),
-                            "endId" to  NodeIDMap.getID(end),
+                            "startId" to getID(node),
+                            "endId" to getID(end),
                             "type" to entry.key,
                         )
                     }
             } else if (value is Node) {
                 relationships +=
                     mapOf(
-                        "startId" to  NodeIDMap.getID(node),
-                        "endId" to  NodeIDMap.getID(value),
+                        "startId" to getID(node),
+                        "endId" to getID(value),
                         "type" to entry.key,
                     )
             }

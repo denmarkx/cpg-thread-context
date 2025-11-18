@@ -2,12 +2,11 @@ package language
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
-import org.bytedeco.javacpp.SizeTPointer
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
-import utils.AuxData
 import utils.MetadataType
 import utils.setMetadata
+import utils.setProperty
 
 fun Node.applyMetadataExt(instr: LLVMValueRef) {
     if (LLVMHasMetadata(instr) == 0) return
@@ -40,7 +39,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef) {
 
     // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is main
     // ...so anything that is not prefixed by /rustc/ is assumed to be "user-code"
-    AuxData.addData(this, "filename", filename)
-    AuxData.addData(this, "line", line.toString())
-    AuxData.addData(this, "isLocal", filename.startsWith("/rustc").toString())
+    setProperty(this, "filename", filename)
+    setProperty(this, "line", line.toString())
+    setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
 }

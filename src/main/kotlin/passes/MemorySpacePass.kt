@@ -11,6 +11,7 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
 import graph.findCallByName
 import utils.Demangle
+import utils.EdgeData
 import utils.MetadataType
 import utils.getMetadata
 
@@ -54,10 +55,9 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             call.arguments.forEach {
                 println(call)
                 println("\t" + it)
-
+                EdgeData.connectNodes(call, it, "DROP_CALL")
             }
         }
-        throw Exception("")
 
         // brainstorming on simplifying memory writes/reads from something on the heap
         // https://stackoverflow.com/questions/73903346/how-box-smart-pointer-is-implemented/73908617#73908617
