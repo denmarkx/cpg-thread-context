@@ -1589,6 +1589,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 )
             binaryOperator.addArgument(op1)
             binaryOperator.addArgument(op2)
+            binaryOperator.applyMetadataExt(instr)
         } else if (op == "ord") {
             // Ordered comparison operand => Replace with !isunordered(x, y)
             // Resulting statement: i1 lhs = !isordered(op1, op2)
@@ -1601,12 +1602,14 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 )
             unorderedCall.addArgument(op1)
             unorderedCall.addArgument(op2)
+            unorderedCall.applyMetadataExt(instr)
             binaryOperator = newUnaryOperator("!", false, true, rawNode = instr)
             binaryOperator.input = unorderedCall
+            binaryOperator.applyMetadataExt(instr)
         } else {
             // Resulting statement: lhs = op1 <op> op2.
             binaryOperator = newBinaryOperator(op, rawNode = instr)
-
+            binaryOperator.applyMetadataExt(instr)
             if (unsigned) {
                 val op1Type = "u${op1.type.name}"
                 val castExprLhs = newCastExpression(rawNode = instr)
@@ -1630,6 +1633,8 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 // Statement is then lhs = isunordered(op1, op2) || (op1 <op> op2)
                 binOpUnordered = newBinaryOperator("||", rawNode = instr)
                 binOpUnordered.rhs = binaryOperator
+                binOpUnordered.applyMetadataExt(instr)
+
                 val unorderedCall =
                     newCallExpression(
                         llvmInternalRef("isunordered"),
@@ -1637,6 +1642,8 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                         false,
                         rawNode = instr,
                     )
+                unorderedCall.applyMetadataExt(instr)
+
                 unorderedCall.addArgument(op1)
                 unorderedCall.addArgument(op2)
                 binOpUnordered.lhs = unorderedCall
