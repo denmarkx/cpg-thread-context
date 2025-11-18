@@ -4,9 +4,9 @@ import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
-import utils.MetadataType
-import utils.setMetadata
-import utils.setProperty
+import graph.MetadataType
+import graph.setMetadata
+import graph.setProperty
 
 fun Node.applyMetadataExt(instr: LLVMValueRef) {
     if (LLVMHasMetadata(instr) == 0) return

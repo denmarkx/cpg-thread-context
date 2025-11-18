@@ -6,7 +6,7 @@ import de.fraunhofer.aisec.cpg.graph.scopes.FunctionScope
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
 import utils.Demangle
-import utils.setProperty
+import graph.setProperty
 
 @ExecuteBefore(LLVMThreadPass::class)
 class ScopePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {

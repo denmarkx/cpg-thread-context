@@ -29,8 +29,8 @@ import de.fraunhofer.aisec.cpg.persistence.properties
 import de.fraunhofer.aisec.cpg.persistence.schemaRelationships
 import org.neo4j.driver.Session
 import org.slf4j.LoggerFactory
-import utils.EdgeData
-import utils.getID
+import graph.getEdges
+import graph.getID
 import kotlin.uuid.ExperimentalUuidApi
 
 /**
@@ -122,11 +122,11 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
     val relationships = mutableListOf<Relationship>()
 
     // EdgeData:
-    EdgeData.getEdges().forEach {
+    getEdges().forEach {
         it.value.forEach { v ->
             relationships += mapOf(
-                "startId" to getID(v.start()),
-                "endId" to getID(v.end()),
+                "startId" to getID(v.start),
+                "endId" to getID(v.end),
                 "type" to it.key
             )
         }

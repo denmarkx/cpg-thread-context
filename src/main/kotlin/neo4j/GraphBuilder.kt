@@ -10,9 +10,9 @@ import org.neo4j.driver.SessionConfig
 import org.neo4j.driver.async.AsyncSession
 import org.neo4j.driver.async.ResultCursor
 import utils.Demangle
-import utils.getID
-import utils.getLabels
-import utils.getProperties
+import graph.getID
+import graph.getLabels
+import graph.getProperties
 import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null

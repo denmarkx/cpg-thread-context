@@ -17,9 +17,9 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import graph.findCallByName
 import utils.Demangle
-import utils.EdgeData
-import utils.addLabel
-import utils.setProperty
+import graph.addLabel
+import graph.connectNodes
+import graph.setProperty
 
 private var test_count = 0
 
@@ -163,7 +163,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 addLabel(prevFuncDecl!!, "ThreadStartDeclaration")
 
                 // Thread spawned from main
-                EdgeData.connectNodes(main, prevFuncDecl, "THREAD_SPAWN")
+                connectNodes(main, prevFuncDecl, "THREAD_SPAWN")
                 var threadEntryDecl : FunctionDeclaration? = null
                 var skipIndex = -1
 
@@ -205,9 +205,9 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     }
                 }
 
-                EdgeData.connectNodes(
-                    findFunctionByName(c.name.localName, exactName = true),
-                    threadEntryDecl,
+                connectNodes(
+                    findFunctionByName(c.name.localName, exactName = true)!!,
+                    threadEntryDecl!!,
                     "THREAD_ENTRY"
                 )
                 setProperty(threadEntryDecl!!, "thread", "T")

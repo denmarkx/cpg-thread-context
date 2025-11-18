@@ -11,9 +11,9 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
 import graph.findCallByName
 import utils.Demangle
-import utils.EdgeData
-import utils.MetadataType
-import utils.getMetadata
+import graph.MetadataType
+import graph.connectNodes
+import graph.getMetadata
 
 @ExecuteLate
 class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
@@ -55,7 +55,7 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             call.arguments.forEach {
                 println(call)
                 println("\t" + it)
-                EdgeData.connectNodes(call, it, "DROP_CALL")
+                connectNodes(call, it, "DROP_CALL")
             }
         }
 

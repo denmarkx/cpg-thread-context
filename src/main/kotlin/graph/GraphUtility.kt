@@ -1,29 +1,38 @@
-package utils
+package graph
 import de.fraunhofer.aisec.cpg.graph.Node
-import java.util.UUID
 
-enum class MetadataType {
-    M_METADATA_HAS_FUNCLET_INFO,
-}
+data class Relationship(val start: Node, val end: Node)
 
-class NodeData {
-    val metadata: MutableMap<MetadataType, String> = mutableMapOf()
-    val labelData: MutableSet<String> = mutableSetOf()
-    val propertyData: MutableMap<String, String> = mutableMapOf()
-    val id: UUID = UUID.randomUUID()
-}
-
-// TODO: replacement for auxdata, labeldata, nodeidmap, edgedata???
 private val nodeData: MutableMap<Node, NodeData> = mutableMapOf()
+private val edgeData: MutableMap<String, MutableSet<Relationship>> = mutableMapOf()
 
-private fun registerNode(node: Node) {
-    if (!nodeData.containsKey(node)) {
-        nodeData[node] = NodeData()
-    }
+
+/*
+==========================================
+ * EDGES
+==========================================
+*/
+
+fun connectNodes(start: Node, end: Node, type: String) {
+    edgeData.putIfAbsent(type, mutableSetOf())
+    edgeData[type]!!.add(Relationship(start, end))
 }
 
-private fun hasNode(node: Node) : Boolean {
-    return nodeData.containsKey(node)
+fun hasRelationshipWith(start: Node, end: Node): Boolean {
+    return edgeData.values.find {
+        it.find {
+            relationship -> relationship.start == start &&
+            relationship.end == end
+        } != null
+    } != null
+}
+
+fun getEdgesForType(type: String): Set<Relationship> {
+    return edgeData.getOrDefault(type, setOf())
+}
+
+fun getEdges(): Map<String, Set<Relationship>> {
+    return edgeData
 }
 
 /*
@@ -110,4 +119,18 @@ fun hasProperty(node: Node, property: String) : Boolean {
 fun getID(node: Node) : String {
     registerNode(node)
     return nodeData[node]!!.id.toString()
+}
+
+/*
+* INTERNAL
+*/
+
+private fun registerNode(node: Node) {
+    if (!nodeData.containsKey(node)) {
+        nodeData[node] = NodeData()
+    }
+}
+
+private fun hasNode(node: Node) : Boolean {
+    return nodeData.containsKey(node)
 }
