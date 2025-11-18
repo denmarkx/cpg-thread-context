@@ -53,6 +53,8 @@ import org.bytedeco.llvm.global.LLVM.*
  * [LLVMValueRef] and [LLVMBasicBlockRef]. Because they do not share any class hierarchy, we need to
  * resort to use [Pointer] as the AST node type here.
  */
+var ctxRef: LLVMContextRef? = null
+
 @RegisterExtraPass(CompressLLVMPass::class)
 class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRLanguageFrontend>) :
     LanguageFrontend<Pointer, LLVMTypeRef>(ctx, language) {
@@ -64,7 +66,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
     val phiList = mutableListOf<LLVMValueRef>()
 
-    var ctxRef: LLVMContextRef? = null
 
     /**
      * This contains a cache binding between an LLVMValueRef (representing a variable) and its

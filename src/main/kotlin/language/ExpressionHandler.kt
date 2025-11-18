@@ -120,7 +120,9 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
     /** Returns a [Reference] for a function (pointer). */
     private fun handleFunction(valueRef: LLVMValueRef): Expression {
-        return newReference(valueRef.name, frontend.typeOf(valueRef), rawNode = valueRef)
+        val reference = newReference(valueRef.name, frontend.typeOf(valueRef), rawNode = valueRef)
+        reference.applyMetadataExt(valueRef)
+        return reference
     }
 
     /**
@@ -139,6 +141,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         val type = frontend.typeOf(valueRef)
 
         val ref = newReference(name, type, rawNode = valueRef)
+        ref.applyMetadataExt(valueRef)
 
         // try to resolve the reference. actually the valueRef is already referring to the resolved
         // variable because we obtain it using LLVMGetOperand, so we just need to look it up in the
@@ -172,6 +175,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val literal = newLiteral(value, type, rawNode = valueRef)
         literal.name = Name(value.toString())
+        literal.applyMetadataExt(valueRef)
         return literal
     }
 
@@ -186,6 +190,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val literal = newLiteral(value, frontend.typeOf(valueRef), rawNode = valueRef)
         literal.name = Name(value.toString())
+        literal.applyMetadataExt(valueRef)
         return literal
     }
 
@@ -196,7 +201,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
      * regular expression.
      */
     private fun handleConstantExprValueKind(value: LLVMValueRef): Expression {
-        return when (val kind = LLVMGetConstOpcode(value)) {
+        val op = when (val kind = LLVMGetConstOpcode(value)) {
             LLVMGetElementPtr -> handleGetElementPtr(value)
             LLVMSelect -> handleSelect(value)
             LLVMTrunc,
@@ -232,6 +237,8 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
+        op.applyMetadataExt(value)
+        return op
     }
 
     /**
@@ -278,6 +285,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val arrayType = LLVMTypeOf(valueRef)
         val list = newInitializerListExpression(frontend.typeOf(valueRef), rawNode = valueRef)
+        list.applyMetadataExt(valueRef)
         val length =
             if (LLVMIsAConstantDataArray(valueRef) != null) {
                 LLVMGetArrayLength(arrayType)
@@ -312,6 +320,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         } else {
             val expr: ConstructExpression =
                 newConstructExpression(frontend.codeOf(value), rawNode = value)
+            expr.applyMetadataExt(value)
             // map the construct expression to the record declaration of the type
             expr.instantiates = (type as? ObjectType)?.recordDeclaration
             if (expr.instantiates == null) return expr
@@ -340,6 +349,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         } else {
             val expr: ConstructExpression =
                 newConstructExpression(frontend.codeOf(value), rawNode = value)
+            expr.applyMetadataExt(value)
             // map the construct expression to the record declaration of the type
             expr.instantiates = (type as? ObjectType)?.recordDeclaration
             if (expr.instantiates == null) return expr
@@ -404,6 +414,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 ProblemNode.ProblemType.TRANSLATION,
                 rawNode = instr,
             )
+        expr.applyMetadataExt(instr)
 
         // loop through all operands / indices
         for (idx: Int in loopStart until numOps) {
@@ -519,6 +530,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         val castExpr = newCastExpression(rawNode = instr)
         castExpr.castType = frontend.typeOf(instr)
         castExpr.expression = frontend.getOperandValueAtIndex(instr, 0)
+        castExpr.applyMetadataExt(instr)
         return castExpr
     }
 }
