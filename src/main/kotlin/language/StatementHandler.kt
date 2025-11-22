@@ -42,6 +42,7 @@ import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
+import utils.Demangle
 import java.nio.IntBuffer
 
 class StatementHandler(lang: LLVMIRLanguageFrontend) :
@@ -1170,9 +1171,16 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         val callExpr = newCallExpression(callee, calledFuncName, false, rawNode = instr)
         callExpr.applyMetadataExt(instr, frontend)
 
+        val callFuncNameDemangled = Demangle.demangle(callExpr.name.localName)
+
         while (idx < max) {
             val operandName = frontend.getOperandValueAtIndex(instr, idx)
+
             callExpr.addArgument(operandName)
+
+            if (callFuncNameDemangled.trim().endsWith("{{closure}}")) {
+                handleClosureCandidate(operandName as Reference)
+            }
             idx++
         }
 

@@ -77,7 +77,6 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
 
                                 // since the call to the actual closure func isnt done yet, this is deferred.
                                 deferClosure(reference as Reference, match?.values?.first()!!)
-                                throw Exception("")
                             }
                             return
                         }
