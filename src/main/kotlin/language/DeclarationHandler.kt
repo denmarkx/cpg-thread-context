@@ -62,7 +62,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
-        declaration.applyMetadataExt(value)
+        declaration.applyMetadataExt(value, frontend)
         return declaration
     }
 
@@ -77,7 +77,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
         val type = frontend.typeOf(valueRef)
 
         val variableDeclaration = newVariableDeclaration(name, type, false, rawNode = valueRef)
-        variableDeclaration.applyMetadataExt(valueRef)
+        variableDeclaration.applyMetadataExt(valueRef, frontend)
 
         // cache binding
         frontend.bindingsCache[valueRef.symbolName] = variableDeclaration
@@ -101,7 +101,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
     private fun handleFunction(func: LLVMValueRef): FunctionDeclaration {
         val name = LLVMGetValueName(func)
         val functionDeclaration = newFunctionDeclaration(name.string, rawNode = func)
-        functionDeclaration.applyMetadataExt(func)
+        functionDeclaration.applyMetadataExt(func, frontend)
 
         // return types are a bit tricky, because the type of the function is a pointer to the
         // function type, which then has the return type in it
@@ -123,7 +123,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
 
             // TODO: support variardic
             val decl = newParameterDeclaration(paramName, type, false, rawNode = param)
-            decl.applyMetadataExt(param)
+            decl.applyMetadataExt(param, frontend)
 
             frontend.scopeManager.addDeclaration(decl)
             functionDeclaration.parameters += decl

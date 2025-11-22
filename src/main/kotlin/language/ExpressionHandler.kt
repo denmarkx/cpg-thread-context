@@ -82,6 +82,15 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
             }
             LLVMMetadataAsValueValueKind,
             LLVMInlineAsmValueKind -> {
+                // Some metadata may be expressed as references that already exist.
+                // Without a base case, this will actually recursively traverse downwards inappropriately.
+                // ..up until the point where LLVMGetNumOperands yields incorrect info.
+                // but I only care about the only reg here.
+
+                val str = LLVMPrintValueToString(value).string
+                if (str.find { c -> c == '%' } != null) {
+                    return frontend.getOperandValueAtIndex(value, 0)
+                }
 
                 return newProblemExpression(
                     "Metadata or ASM value kind not supported yet",
@@ -115,14 +124,14 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 }
             }
         }
-        expression.applyMetadataExt(value)
+        expression.applyMetadataExt(value, frontend)
         return expression
     }
 
     /** Returns a [Reference] for a function (pointer). */
     private fun handleFunction(valueRef: LLVMValueRef): Expression {
         val reference = newReference(valueRef.name, frontend.typeOf(valueRef), rawNode = valueRef)
-        reference.applyMetadataExt(valueRef)
+        reference.applyMetadataExt(valueRef, frontend)
         return reference
     }
 
@@ -142,7 +151,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         val type = frontend.typeOf(valueRef)
 
         val ref = newReference(name, type, rawNode = valueRef)
-        ref.applyMetadataExt(valueRef)
+        ref.applyMetadataExt(valueRef, frontend)
 
         // try to resolve the reference. actually the valueRef is already referring to the resolved
         // variable because we obtain it using LLVMGetOperand, so we just need to look it up in the
@@ -176,7 +185,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val literal = newLiteral(value, type, rawNode = valueRef)
         literal.name = Name(value.toString())
-        literal.applyMetadataExt(valueRef)
+        literal.applyMetadataExt(valueRef, frontend)
         return literal
     }
 
@@ -191,7 +200,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val literal = newLiteral(value, frontend.typeOf(valueRef), rawNode = valueRef)
         literal.name = Name(value.toString())
-        literal.applyMetadataExt(valueRef)
+        literal.applyMetadataExt(valueRef, frontend)
         return literal
     }
 
@@ -238,7 +247,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
-        op.applyMetadataExt(value)
+        op.applyMetadataExt(value, frontend)
         return op
     }
 
@@ -286,7 +295,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
 
         val arrayType = LLVMTypeOf(valueRef)
         val list = newInitializerListExpression(frontend.typeOf(valueRef), rawNode = valueRef)
-        list.applyMetadataExt(valueRef)
+        list.applyMetadataExt(valueRef, frontend)
         val length =
             if (LLVMIsAConstantDataArray(valueRef) != null) {
                 LLVMGetArrayLength(arrayType)
@@ -321,7 +330,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         } else {
             val expr: ConstructExpression =
                 newConstructExpression(frontend.codeOf(value), rawNode = value)
-            expr.applyMetadataExt(value)
+            expr.applyMetadataExt(value, frontend)
             // map the construct expression to the record declaration of the type
             expr.instantiates = (type as? ObjectType)?.recordDeclaration
             if (expr.instantiates == null) return expr
@@ -350,7 +359,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         } else {
             val expr: ConstructExpression =
                 newConstructExpression(frontend.codeOf(value), rawNode = value)
-            expr.applyMetadataExt(value)
+            expr.applyMetadataExt(value, frontend)
             // map the construct expression to the record declaration of the type
             expr.instantiates = (type as? ObjectType)?.recordDeclaration
             if (expr.instantiates == null) return expr
@@ -415,7 +424,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 ProblemNode.ProblemType.TRANSLATION,
                 rawNode = instr,
             )
-        expr.applyMetadataExt(instr)
+        expr.applyMetadataExt(instr, frontend)
 
         // loop through all operands / indices
         for (idx: Int in loopStart until numOps) {
@@ -531,7 +540,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         val castExpr = newCastExpression(rawNode = instr)
         castExpr.castType = frontend.typeOf(instr)
         castExpr.expression = frontend.getOperandValueAtIndex(instr, 0)
-        castExpr.applyMetadataExt(instr)
+        castExpr.applyMetadataExt(instr, frontend)
         return castExpr
     }
 }
