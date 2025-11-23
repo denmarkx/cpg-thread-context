@@ -157,6 +157,11 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         // instead of internally from within rust (and also so we know what to branch out to from here)
         for (c in main.calls) {
             if (Demangle.demangle(c.name.localName) == "std::thread::spawn") {
+                // Any data explicitly moved into the thread closure is taken from std::thread::spawn -> the entire flow.
+                // This is hard to track in a graph, so I sort of intercept the last argument here.
+                // todo: does this still exist in non-moved closures or is it just the handle?
+                val moved = c.arguments.last()
+
                 // c.name matches to a name within the IR, but
                 // the mangled suffix contains the hash which is important
                 var prevFuncDecl = findFunctionByName(c.name.localName, exactName = true)
@@ -204,6 +209,9 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                             true)
                     }
                 }
+
+                val parameter = threadEntryDecl!!.parameters.first()
+                connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
 
                 connectNodes(
                     findFunctionByName(c.name.localName, exactName = true)!!,

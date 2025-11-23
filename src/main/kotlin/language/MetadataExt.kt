@@ -1,9 +1,6 @@
 package language
 
 import de.fraunhofer.aisec.cpg.graph.Node
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import org.bytedeco.llvm.LLVM.LLVMValueRef
@@ -12,7 +9,7 @@ import graph.MetadataType
 import graph.setMetadata
 import graph.setProperty
 import org.bytedeco.javacpp.SizeTPointer
-import org.bytedeco.llvm.LLVM.LLVMTypeRef
+import org.bytedeco.llvm.LLVM.LLVMMetadataRef
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
     if (LLVMHasMetadata(instr) == 0) return
@@ -41,12 +38,15 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             }
 
             // There exists a disconnection within the CPG between data that is moved into a closure.
+            // A captured borrow is passed as a regular arg to the closure call.
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
             if (this.name.localName == "llvm.dbg.declare") {
-                // todo: this may be wrong
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
+
+                // undef is expressed as a literal
+                if (reference !is Reference) break
 
                 if (i == 1) {
                     val md = LLVMValueAsMetadata(op)
@@ -58,29 +58,30 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
                     // via a callexpression for a function suffixed by ::{{closure}}.
                     // though this means that this'll keep data that ends up never being for a closure.
                     if (LLVMGetMetadataKind(typeMD) == LLVMDICompositeTypeMetadataKind) {
+                        if (LLVMDITypeGetFlags(typeMD) == LLVMDIFlagEnumClass) break
+
                         // elements is of !{e1,e2,..} where type of e is DIDerivedType.
                         val elements = LLVMGetOperand(type, 4)
-
-                        // TODO: untested with non-move closures.
-                        // I am assuming that since we are MOVING this var into the closure
-                        // that the var is local to this scope or scopes above us up until the funcdecl.
-                        // since moving a borrowed var doesnt make sense.
-
-                        // llvm bindings my ass holy shit
                         for (i in 0 until LLVMGetNumOperands(elements)) {
                             val operand = LLVMGetOperand(elements, i)
-                            val ptr = SizeTPointer(20)
-                            val bytePtr = LLVMDITypeGetName(LLVMValueAsMetadata(operand), ptr)
-                            if (bytePtr.string.startsWith("test")) {
-                                val match = this.scope?.symbols?.filterKeys {
-                                    k -> k.split(".dbg.spill")[0].equals(bytePtr.string) }
+                            val operandMD = LLVMValueAsMetadata(operand)
+                            if (LLVMGetMetadataKind(operandMD) == LLVMDIEnumeratorMetadataKind) break
 
-                                // since the call to the actual closure func isnt done yet, this is deferred.
-                                deferClosure(reference as Reference, match?.values?.first()!!)
+                            val bytePtr = LLVMDITypeGetName(
+                                operandMD,
+                                SizeTPointer(20)) ?: break
+
+                            val match = this.scope?.symbols?.filterKeys {
+                                k ->
+                                k.split(".dbg.spill")[0] == bytePtr.string
                             }
-                            return
+                            if (match.isNullOrEmpty()) break
+
+                            // since the call to the actual closure func isnt done yet, this is deferred.
+                            deferClosure(reference, match.values.first())
                         }
                     }
+                    break
                 }
             }
         }
@@ -91,4 +92,12 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
     setProperty(this, "filename", filename)
     setProperty(this, "line", line.toString())
     setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
+}
+
+fun PrintLLVMVal(v: LLVMValueRef?) {
+    println(LLVMPrintValueToString(v).string)
+}
+
+fun PrintLLVMMD(v: LLVMMetadataRef?) {
+    println(LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, v)).string)
 }

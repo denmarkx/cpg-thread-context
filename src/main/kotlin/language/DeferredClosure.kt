@@ -4,21 +4,22 @@ package language
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import graph.connectNodes
-import graph.setProperty
 import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 var deferClosureMap: MutableMap<Reference, DeferredClosure> = mutableMapOf()
 
 fun deferClosure(reference: Reference, nodes: List<Node>) {
-    deferClosureMap[reference] = DeferredClosure(reference, nodes)
+    val deferredClosure = deferClosureMap[reference]
+    deferredClosure?.retainNodes(nodes)
+    if (deferredClosure == null) {
+        deferClosureMap[reference] = DeferredClosure(reference, nodes.toMutableList())
+    }
 }
 
 fun handleClosureCandidate(reference: Reference) {
     // If this reference is for a true closure, then it does exist within deferClosureMap.
     // However, these are two reference objects that are both logically the same.
     // ..meaning I have to be a bit ugly about getting from the dict here
-    // todo: but obviously this is bullshit
     val filtered = deferClosureMap.filter { (k, _) ->
         k.name == reference.name &&
         k.refersTo == reference.refersTo
@@ -31,9 +32,7 @@ fun handleClosureCandidate(reference: Reference) {
 * Eventually, we expect the given VariableDeclaration to be used as a primary
 * argument to a CallExpression suffixed by {{closure}}.
 */
-class DeferredClosure(val reference: Reference, val nodes: List<Node>) {
-    // todo: need to wait for an incoming call expression to a func ending with {{closure}} that uses reference as its only arg
-
+class DeferredClosure(val reference: Reference, private val nodes: MutableList<Node>) {
     fun handle() {
         // The reference here is what is sent to the actual closure function.
         // ..which is where nodes gets moved into via being reassigned to the reference.
@@ -45,6 +44,10 @@ class DeferredClosure(val reference: Reference, val nodes: List<Node>) {
         nodes.forEach { n ->
             connectNodes(n, reference, "DFG")
         }
+    }
+
+    fun retainNodes(node: List<Node>) {
+        nodes += node
     }
 
     override fun toString() : String {
@@ -59,4 +62,3 @@ class DeferredClosure(val reference: Reference, val nodes: List<Node>) {
                 "  nodes = " + nodeStr + "\n}"
     }
 }
-

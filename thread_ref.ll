@@ -4764,15 +4764,15 @@ bb4:                                              ; preds = %start
   br label %bb7, !dbg !2684
 
 bb3:                                              ; preds = %start
-  fence acquire, !dbg !2685
+  fence release, !dbg !2685
   br label %bb7, !dbg !2685
 
 bb5:                                              ; preds = %start
-  fence acq_rel, !dbg !2686
+  fence release, !dbg !2686
   br label %bb7, !dbg !2686
 
 bb6:                                              ; preds = %start
-  fence seq_cst, !dbg !2687
+  fence release, !dbg !2687
   br label %bb7, !dbg !2687
 
 bb7:                                              ; preds = %bb4, %bb3, %bb5, %bb6

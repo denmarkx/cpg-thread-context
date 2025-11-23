@@ -14,7 +14,7 @@ import kotlin.uuid.ExperimentalUuidApi
 
 @OptIn(ExperimentalUuidApi::class)
 fun main() {
-    val file = File("move.ll")
+    val file = File("closure_capture_borrow.ll")
     val t1 = Demangle.demangle("_ZN3std6thread5spawn17h5c73a64a896f1bb0E")
     val t2 = Demangle.demangle($$$"_ZN3std6thread7Builder15spawn_unchecked28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17hcd3a2026d11fffccE")
     val t3 = Demangle.demangle($$$"_ZN119_$LT$core..ptr..non_null..NonNull$LT$T$GT$$u20$as$u20$core..convert..From$LT$core..ptr..unique..Unique$LT$T$GT$$GT$$GT$4from17h028492234fcc4897E")
