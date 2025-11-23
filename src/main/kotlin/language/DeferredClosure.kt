@@ -43,6 +43,7 @@ class DeferredClosure(val reference: Reference, private val nodes: MutableList<N
         */
         nodes.forEach { n ->
             connectNodes(n, reference, "DFG")
+            connectNodes(n, reference, "CLOSURE_OWNERSHIP")
         }
     }
 

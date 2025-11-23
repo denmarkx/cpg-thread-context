@@ -6,6 +6,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import graph.MetadataType
+import graph.scheduleDeletion
 import graph.setMetadata
 import graph.setProperty
 import org.bytedeco.javacpp.SizeTPointer
@@ -42,6 +43,8 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
             if (this.name.localName == "llvm.dbg.declare") {
+                scheduleDeletion(this)
+
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
 
