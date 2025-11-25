@@ -1152,7 +1152,9 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         var tryContinue: GotoStatement = newGotoStatement(rawNode = instr)
         tryContinue.applyMetadataExt(instr, frontend)
         if (instr.opCode == LLVMInvoke) {
-            max-- // Last one is the Decl.Expr of the function
+            // NOTE:
+            // This is not true?
+//            max-- // Last one is the Decl.Expr of the function
             // Get the label of the catch clause.
             gotoCatch = assembleGotoStatement(instr, LLVMGetOperand(instr, max))
             max--
