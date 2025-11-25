@@ -1,17 +1,34 @@
 package passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
+import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.NodePath
 import de.fraunhofer.aisec.cpg.graph.blocks
 import de.fraunhofer.aisec.cpg.graph.calls
+import de.fraunhofer.aisec.cpg.graph.collectAllNextFullDFGPaths
+import de.fraunhofer.aisec.cpg.graph.collectAllPrevDFGPaths
+import de.fraunhofer.aisec.cpg.graph.collectAllPrevEOGPaths
+import de.fraunhofer.aisec.cpg.graph.collectAllPrevFullDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.dfgFrom
+import de.fraunhofer.aisec.cpg.graph.edges.dataflows
+import de.fraunhofer.aisec.cpg.graph.edges.edges
+import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflows
+import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
+import de.fraunhofer.aisec.cpg.graph.invoke
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Literal
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
@@ -210,6 +227,11 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     }
                 }
 
+                // To actually know what moved really is, I traverse by prevDFG all the way back.
+                val moved_real = traverseRealReference(moved)
+                println(moved_real)
+                throw Exception("")
+
                 val parameter = threadEntryDecl!!.parameters.first()
                 connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
 
@@ -232,5 +254,68 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 //        }
 //        var next = threadEntryDecl?.nextEOG
 //        markNodeWithThread(next?.get(0)!!)
+    }
+
+    fun traverseRealReference(node: Node): Node? {
+        // todo: why do some references not have dfg edges?
+        // todo: i have no answer as to why this spits out different things every run
+        // but solving the first question will solve all my problems.
+        // - Exclusions: NO DFG & initializer edges.
+        // - END: End when no cases can be satisfied OR when prevDFG is a Literal.
+        // - Cases:
+        //    - No Prev DFG: If VariableDecl, check refersTo and traverse prevDFG on Reference { access = WRITE }
+        //    - Reference (WRITE): will be next DFG only to the UnaryOperator. Then back to prevDFG.
+        print("\nnode: ")
+        println(node)
+
+        if (node is Literal<*>) {
+            return node
+        }
+
+        // We will consider the initializer acceptable IF and ONLY IF the VarDecl
+        // does not have a WRITE REFERENCE
+        var prevPaths = node.prevDFGEdges.filter { it.start != node }
+
+        if (node is VariableDeclaration) {
+            prevPaths = prevPaths.filter { it.start != node.initializer }
+            println("references:")
+            node.usages.forEach {
+                print("   - [${it.access}] " )
+                println(it)
+            }
+            // node.refs here may return empty, but node.usages won't..?
+            if (node.usages.find { r -> r.access == AccessValues.WRITE } == null) {
+                prevPaths = node.prevDFGEdges.toList()
+            }
+        }
+//        prevPaths = prevPaths.filter { it.start != node }
+        println(prevPaths)
+
+        println("previous (filtered) dfg:")
+        prevPaths.forEach { print("  - "); println(it.start) }
+
+        println("previous (unfiltered) dfg:")
+        node.prevDFGEdges.forEach { print("  - "); println(it.start) }
+
+        // if any of the previous paths is a literal, we're going to the literal.
+        // and im going to absolutely hope that its just 1
+        val literal = prevPaths.find { it.start is Literal<*> }?.start
+        if (literal != null) {
+            return literal
+        }
+
+        if (prevPaths.isEmpty() && node is VariableDeclaration) {
+            node.usages.filter { it.access == AccessValues.WRITE }.forEach {
+                r -> traverseRealReference(r)
+            }
+            return null
+        }
+
+        if (node is Reference && node.access == AccessValues.WRITE) {
+            return traverseRealReference(node.nextDFG.find { it is UnaryOperator }!!)
+        }
+
+        prevPaths.forEach { traverseRealReference(it.start) }
+        return null
     }
 }
