@@ -319,6 +319,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 val writeRef: Reference? = node.usages.find { it.access == AccessValues.WRITE }
                 println("  (node is VarDecl; writeRef=) $writeRef")
                 if (writeRef == null) return null
+                path.add(writeRef)
 
                 // From that write reference, the DFG direction will switch as it directs to a UnaryOperator.
                 // On the subsequent call, where we are in this func as a UnaryOperator, we switch back the DFG.
