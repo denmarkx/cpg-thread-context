@@ -16,6 +16,7 @@ import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.dfgFrom
 import de.fraunhofer.aisec.cpg.graph.edges.dataflows
 import de.fraunhofer.aisec.cpg.graph.edges.edges
+import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflows
 import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.invoke
@@ -36,7 +37,9 @@ import graph.findCallByName
 import utils.Demangle
 import graph.addLabel
 import graph.connectNodes
+import graph.getProperty
 import graph.setProperty
+import kotlin.reflect.typeOf
 
 private var test_count = 0
 
@@ -172,8 +175,10 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         // From the entry, traverse the CALLS within until we find std::thread::spawn.
         // TODO: need a debug parser pass so that i can know when a thread is spawned from the user code
         // instead of internally from within rust (and also so we know what to branch out to from here)
+        var threadContext = 0
         for (c in main.calls) {
             if (Demangle.demangle(c.name.localName) == "std::thread::spawn") {
+                threadContext += 1
                 // Any data explicitly moved into the thread closure is taken from std::thread::spawn -> the entire flow.
                 // This is hard to track in a graph, so I sort of intercept the last argument here.
                 // todo: does this still exist in non-moved closures or is it just the handle?
@@ -228,9 +233,17 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
 
                 // To actually know what moved really is, I traverse by prevDFG all the way back.
-                val moved_real = traverseRealReference(moved)
-                println(moved_real)
-                throw Exception("")
+                val nodePathPair = findDataflowPath(moved)
+                val movedFinalNode = nodePathPair.first
+                val path = nodePathPair.second
+
+                path.forEach { n ->
+                    if (getProperty(n, "THREAD_USE") != null) {
+                        setProperty(n, "THREAD_USE", "SHARED")
+                    } else {
+                        setProperty(n, "THREAD_USE", "T${threadContext}")
+                    }
+                }
 
                 val parameter = threadEntryDecl!!.parameters.first()
                 connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
@@ -256,66 +269,75 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 //        markNodeWithThread(next?.get(0)!!)
     }
 
-    fun traverseRealReference(node: Node): Node? {
-        // todo: why do some references not have dfg edges?
-        // todo: i have no answer as to why this spits out different things every run
-        // but solving the first question will solve all my problems.
-        // - Exclusions: NO DFG & initializer edges.
-        // - END: End when no cases can be satisfied OR when prevDFG is a Literal.
-        // - Cases:
-        //    - No Prev DFG: If VariableDecl, check refersTo and traverse prevDFG on Reference { access = WRITE }
-        //    - Reference (WRITE): will be next DFG only to the UnaryOperator. Then back to prevDFG.
-        print("\nnode: ")
-        println(node)
+    fun getType(node: Node): String {
+        return node.javaClass.typeName.split(".").last()
+    }
 
-        if (node is Literal<*>) {
-            return node
+    fun printDFL(dfl: Iterable<Dataflow>) {
+        dfl.forEach {
+            println ("  ${it.start.name} (${getType(it.start)}) --> ${it.end.name} (${getType(it.end)})")
+        }
+    }
+
+    fun findDataflowPath(node: Node): Pair<Node?, Set<Node>> {
+        val set = mutableSetOf<Node>()
+        val final = recursivelyTraverseDataflow(node, null, set)
+        return Pair(final, set.toSet())
+    }
+
+    fun recursivelyTraverseDataflow(node: Node, prevNode: Node?, path: MutableSet<Node>): Node? {
+        path.add(node)
+
+        print(node.name.localName)
+        println(" (${node.javaClass.typeName.split(".").last()})")
+
+        // STOP at a LITERAL.
+        if (node is Literal<*>) return node
+
+        // From a UnaryOperator, we will have two DFGs. We follow the one that is not prevNode.
+        if (node is UnaryOperator) {
+            println("  prevNode = ${prevNode!!.name.localName} (${getType(prevNode)}")
+            val readRef = node.prevDFGEdges.find { it.start != prevNode }
+            return recursivelyTraverseDataflow(readRef!!.start, node, path)
         }
 
-        // We will consider the initializer acceptable IF and ONLY IF the VarDecl
-        // does not have a WRITE REFERENCE
-        var prevPaths = node.prevDFGEdges.filter { it.start != node }
-
-        if (node is VariableDeclaration) {
-            prevPaths = prevPaths.filter { it.start != node.initializer }
-            println("references:")
-            node.usages.forEach {
-                print("   - [${it.access}] " )
-                println(it)
-            }
-            // node.refs here may return empty, but node.usages won't..?
-            if (node.usages.find { r -> r.access == AccessValues.WRITE } == null) {
-                prevPaths = node.prevDFGEdges.toList()
-            }
+        // Continuously traverse the DFG backwards until we can't; NewArrayExpressions are ignored.
+        // (Also, prevDFGEdges may have references pointing to themselves even though the graph doesn't explicitly show this).
+        val edges = node.prevDFGEdges.filter {
+            it.start !is NewArrayExpression &&
+            it.start != node
         }
-//        prevPaths = prevPaths.filter { it.start != node }
-        println(prevPaths)
-
-        println("previous (filtered) dfg:")
-        prevPaths.forEach { print("  - "); println(it.start) }
-
-        println("previous (unfiltered) dfg:")
-        node.prevDFGEdges.forEach { print("  - "); println(it.start) }
-
-        // if any of the previous paths is a literal, we're going to the literal.
-        // and im going to absolutely hope that its just 1
-        val literal = prevPaths.find { it.start is Literal<*> }?.start
-        if (literal != null) {
-            return literal
+        if (edges.isEmpty()) {
+            println("  (edges empty)")
+        } else {
+            printDFL(edges)
         }
 
-        if (prevPaths.isEmpty() && node is VariableDeclaration) {
-            node.usages.filter { it.access == AccessValues.WRITE }.forEach {
-                r -> traverseRealReference(r)
+        // If there is no DFG available AND we are at a VarDecl node, check for a WRITE reference.
+        if (edges.isEmpty()) {
+            if (node is VariableDeclaration) {
+                val writeRef: Reference? = node.usages.find { it.access == AccessValues.WRITE }
+                println("  (node is VarDecl; writeRef=) $writeRef")
+                if (writeRef == null) return null
+
+                // From that write reference, the DFG direction will switch as it directs to a UnaryOperator.
+                // On the subsequent call, where we are in this func as a UnaryOperator, we switch back the DFG.
+                return recursivelyTraverseDataflow(writeRef.nextDFG.toList().first { it != writeRef }, writeRef, path)
             }
             return null
         }
 
-        if (node is Reference && node.access == AccessValues.WRITE) {
-            return traverseRealReference(node.nextDFG.find { it is UnaryOperator }!!)
+        // If there is a DFG present (and node is a VarDecl),
+        if (node is VariableDeclaration) {
+            // AND there exists a WRITE reference, we choose the WRITE ref.
+            val write = node.usages.find { it.access == AccessValues.WRITE }
+
+            // TODO: Currently, I have no idea why a DFG may not exist for this.
+            // TODO: It is listed that if this is the case, a PDG edge may remedy the situation. This is not the case.
+            if (write != null) return recursivelyTraverseDataflow(write, node, path)
         }
 
-        prevPaths.forEach { traverseRealReference(it.start) }
-        return null
+        // If we can't satisfy any of the above, continue to traverse backwards.
+        return recursivelyTraverseDataflow(edges.first().start, node, path)
     }
 }
