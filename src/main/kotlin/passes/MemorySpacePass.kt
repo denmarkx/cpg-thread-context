@@ -9,7 +9,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
-import graph.findCallByName
+//import graph.findCallByName
 import utils.Demangle
 import graph.MetadataType
 import graph.connectNodes
@@ -61,16 +61,16 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
         // brainstorming on simplifying memory writes/reads from something on the heap
         // https://stackoverflow.com/questions/73903346/how-box-smart-pointer-is-implemented/73908617#73908617
-        val call = findCallByName(nodes, "alloc::alloc::exchange_malloc")
+//        val call = findCallByName(nodes, "alloc::alloc::exchange_malloc")
         return
 
         // ::new will always return something and be connected via DFG, so
         // (call, variabledeclaration) ∈ DFG
-        val variable = call?.nextDFG!!.elementAt(0) as VariableDeclaration
+//        val variable = call?.nextDFG!!.elementAt(0) as VariableDeclaration
 
         // by definition (variable, Reference) ∈ REFERS_TO
         // assuming that IR will optimize out heap allocations that never have a reference..?
-        val references = variable.refs
+//        val references = variable.refs
 
     }
 }

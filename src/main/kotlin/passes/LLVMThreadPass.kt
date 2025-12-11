@@ -1,27 +1,31 @@
 package passes
 
+/*
+* This is Rust-specific (which is intentional for the time being).
+*
+* Properly, we would be looking for the FFI calls that occur.
+* (EX: @pthread on unix and @CreateThread on win32)
+* ..which is available only with lto enabled.
+*/
+
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.blocks
 import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.refs
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
-import graph.findCallByName
+import graph.findNodeByName
 import utils.Demangle
-import graph.addLabel
-import graph.connectNodes
-import graph.setProperty
+import graph.*
 
-private var test_count = 0
+// NOTE: This is extremely Rust-specific, but that is deliberate to start with.
+// Properly, we would compile with -lto and identify the OS-specific function calls
+// ex: @pthread on UNIX and @CreateThread on win32.
 
 val threadSpawnFlow = arrayOf(
     "std::thread::Builder::spawn",
@@ -42,110 +46,12 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     lateinit var nodes : List<Node>
     override fun cleanup() {}
 
-    fun findFunctionByName(name: String, exactName: Boolean =false): FunctionDeclaration? {
-        /*
-        * Given an unmangled function name, return the corresponding FunctionDeclaration or null.
-        * If exactName=true, name is expected to be mangled.
-        */
-        return nodes
-            .filterIsInstance<FunctionDeclaration>()
-            .find {
-                (if (!exactName) {
-                    Demangle.demangle(it.name.localName).equals(name)
-                } else {
-                    it.name.localName == name
-                })
-            }
-    }
-
-    fun findFunctionWithinCallParams(call: CallExpression?, name: String): FunctionDeclaration? {
-        /*
-        * CallExpression's parameters may contain a function pointer that isn't marked as FnOnce, Fn, FnMut, etc.
-        * Example: call i32 @__rust_try(void (i8*)* @std::panicking::try::do_call)
-        *
-        * Normally, we would be able to get the function pointer from the ParameterDeclaration of rust_try's FunctionDecl.
-        * However, the ParameterDeclaration doesn't hold anyway to grab the Reference.
-        *
-        * This uses the CallExpr instead and traverses through its references in hopes to find the given name.
-        */
-        val reference = call.refs
-            .find { Demangle.demangle(it.name.localName) == name }
-
-        if (reference == null) return null
-
-        // From the reference, get the corresponding function decl.
-        return reference.refersTo as FunctionDeclaration
-    }
-
-    fun findCallWithinBlocks(blocks: List<Block>, name: String): CallExpression? {
-        /*
-        * Given a list of Blocks and an unmangled name, return the CallExpression
-        * if found within the blocks.
-        */
-        var callCandidate: CallExpression? = null
-
-        for (block in blocks) {
-            // Grab the CallExpression:
-            callCandidate = SubgraphWalker.flattenAST(block)
-                .filterIsInstance<CallExpression>()
-                .find { Demangle.demangle(it.name.localName).equals(name)}
-            if (callCandidate != null) break
-        }
-
-        return callCandidate
-    }
-
-    fun findFunctionWithinBlocks(blocks: List<Block>, name: String): FunctionDeclaration? {
-        /*
-        * Given a list of Blocks and an unmangled name, determine if the function is called
-        * from somewhere within the blocks and return the declaration.
-        */
-
-        // If there was never a CallExpression found, that means this function was never called within
-        // the list of blocks we were given.
-        val functionCandidate: CallExpression = findCallWithinBlocks(blocks, name) ?: return null
-
-        // Then the FunctionDeclaration:
-        return findFunctionByName(functionCandidate.name.localName, exactName = true)
-    }
-
-    fun findVTableWithinBlocks(blocks: List<Block>): VariableDeclaration? {
-        /*
-        * Given a list of blocks, looks for a reference to a vtable and returns the VariableDeclaration or null.
-        * This assumes that only one vtable is referenced within all the blocks.
-        */
-        var vtableReference: Reference? = null
-        for (block in blocks) {
-            vtableReference = SubgraphWalker.flattenAST(block)
-                .filterIsInstance<Reference>()
-                .find { it.name.contains("vtable") }
-            if (vtableReference != null) break
-        }
-
-        // Handle no vtable being found:
-        if (vtableReference == null) return null;
-
-        // Otherwise, grab the variabledecl:
-        return vtableReference.refersTo as VariableDeclaration
-    }
-
-    fun getVTableShim(vtable: VariableDeclaration?): FunctionDeclaration? {
-        /*
-        * Given a VarDecl to a vtable, return the FunctionDeclaration that is stored within.
-        */
-        // The vtable is stored as  <{ i8*, [16 x i8], i8*, [0 x i8] }>
-        // ..which is a fat pointer. The only thing we want here is the second pointer.
-        val references = vtable.nodes.filterIsInstance<Reference>()
-        if (references.isEmpty() || references.size < 2) return null
-        return references[1].refersTo as FunctionDeclaration
-    }
-
     override fun accept(t: TranslationUnitDeclaration) {
         nodes = SubgraphWalker.flattenAST(t)
 
         // The main thread is different and always starts from std::rt::lang_start
         // https://stdrs.dev/nightly/x86_64-unknown-linux-gnu/src/std/rt.rs.html#159-172
-        val entryCallExpr = findCallByName(nodes, "std::rt::lang_start") ?: return
+        val entryCallExpr = findNodeByName<CallExpression>(nodes, "std::rt::lang_start") ?: return
 
         // only care about that first function: lang_start(main: fn() -> T, ...)
         // though the rest are argc, argv, and sigpipe.
@@ -164,7 +70,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
                 // c.name matches to a name within the IR, but
                 // the mangled suffix contains the hash which is important
-                var prevFuncDecl = findFunctionByName(c.name.localName, exactName = true)
+                var prevFuncDecl = findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true)
                 addLabel(prevFuncDecl!!, "ThreadStartDeclaration")
 
                 // Thread spawned from main
@@ -197,12 +103,13 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                         continue
                     }
 
-                    prevFuncDecl = findFunctionWithinBlocks(prevFuncDecl.blocks, funcName)
+                    prevFuncDecl = findFunctionWithinBlocks(nodes, prevFuncDecl.blocks, funcName)
 
                     // If we're at the end (thread-spawn chains only), the next immediate call is the entry point for thread 2.
                     if (i == threadSpawnFlow.size - 1) {
                         // the next immediate call that is NOT llvm.dbg
-                        threadEntryDecl = findFunctionByName(
+                        threadEntryDecl = findNodeByName<FunctionDeclaration>(
+                            nodes,
                             prevFuncDecl.calls.filter {
                                 !it.name.localName.startsWith("llvm.dbg")
                             }[0].name.localName,
@@ -210,11 +117,14 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     }
                 }
 
-                val parameter = threadEntryDecl!!.parameters.first()
-                connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
+
+                val parameter = threadEntryDecl!!.parameters.firstOrNull()
+                if (parameter != null) {
+                    connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
+                }
 
                 connectNodes(
-                    findFunctionByName(c.name.localName, exactName = true)!!,
+                    findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true)!!,
                     threadEntryDecl!!,
                     "THREAD_ENTRY"
                 )
