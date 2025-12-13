@@ -53,8 +53,8 @@ class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             // although we can parse the code or hijack it within the language package
             // call void @"......"(i32** %b) #9 [ "funclet"(token %cleanuppad) ], !dbg !153
             call.arguments.forEach {
-                println(call)
-                println("\t" + it)
+//                println(call)
+//                println("\t" + it)
                 connectNodes(call, it, "DROP_CALL")
             }
         }

@@ -2,10 +2,12 @@ package graph
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.ast
+import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.refs
+import de.fraunhofer.aisec.cpg.graph.returns
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
@@ -120,3 +122,14 @@ fun findFunctionWithinCallParams(call: CallExpression?, name: String): FunctionD
     // From the reference, get the corresponding function decl.
     return reference.refersTo as FunctionDeclaration
 }
+
+/*
+*
+*/
+fun getLHSFromCall(nodes: List<Node>, callName: String): Set<VariableDeclaration> {
+    // Does not have a nextDFG if returning void:
+    // TODO: what happens if this matches multiple?
+    val call = findNodeByName<CallExpression>(nodes, callName)
+    return call?.nextDFG as Set<VariableDeclaration>
+}
+
