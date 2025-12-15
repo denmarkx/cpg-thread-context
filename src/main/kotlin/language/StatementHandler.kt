@@ -1153,15 +1153,13 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         tryContinue.applyMetadataExt(instr, frontend)
         if (instr.opCode == LLVMInvoke) {
             // NOTE:
-            // This is not true?
-//            max-- // Last one is the Decl.Expr of the function
+            max-- // Last one is the Decl.Expr of the function
             // Get the label of the catch clause.
             gotoCatch = assembleGotoStatement(instr, LLVMGetOperand(instr, max))
             max--
             // Get the label of the basic block where the control flow continues (e.g. if no error
             // occurs).
             tryContinue = assembleGotoStatement(instr, LLVMGetOperand(instr, max))
-            max--
             log.info(
                 "Invoke expression: Usually continues at ${tryContinue.labelName}, exception continues at ${gotoCatch.labelName}"
             )
@@ -1177,7 +1175,6 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         while (idx < max) {
             val operandName = frontend.getOperandValueAtIndex(instr, idx)
-
             callExpr.addArgument(operandName)
 
             if (callFuncNameDemangled.trim().endsWith("{{closure}}")) {
