@@ -2,20 +2,26 @@ package graph
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.ast
+import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.refs
+import de.fraunhofer.aisec.cpg.graph.returns
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import utils.Demangle
 
-// TODO: i would prefer to pass a type if kotlin will let me here to simplify this
-fun findCallByName(nodes: List<Node>, name: String, exactName: Boolean = false): CallExpression? {
+inline fun <reified T: Node> findNodeByName(nodes: List<Node>, name: String, exactName: Boolean = false): List<T> {
     /*
-    * Given an unmangled function name, return the corresponding FunctionDeclaration or null.
+    * Given an unmangled function name, return the corresponding object or null.
     * If exactName=true, name is expected to be mangled.
     */
     return nodes
-        .filterIsInstance<CallExpression>()
-        .find {
+        .filterIsInstance<T>()
+        .filter {
             (if (!exactName) {
                 Demangle.demangle(it.name.localName).equals(name)
             } else {
@@ -24,14 +30,104 @@ fun findCallByName(nodes: List<Node>, name: String, exactName: Boolean = false):
         }
     }
 
-    /*
-     * From a block, traverse upwards to the FunctionDeclaration.
-    */
-    fun getFunctionDeclarationFromBlock(block: Block) : FunctionDeclaration? {
-        fun traverse(node: Node?): FunctionDeclaration? {
-            if (node == null) return null
-            if (node is FunctionDeclaration) return node
-            return traverse(node.astParent)
-        }
-        return traverse(block.astParent)
+/*
+ * From a block, traverse upwards to the FunctionDeclaration.
+*/
+fun getFunctionDeclarationFromBlock(block: Block) : FunctionDeclaration? {
+    fun traverse(node: Node?): FunctionDeclaration? {
+        if (node == null) return null
+        if (node is FunctionDeclaration) return node
+        return traverse(node.astParent)
     }
+    return traverse(block.astParent)
+}
+
+/*
+ * Given a list of Blocks and an unmangled name, return the CallExpression
+ * if found within the blocks.
+*/
+fun findCallWithinBlocks(blocks: List<Block>, name: String): CallExpression? {
+    var callCandidate: CallExpression? = null
+
+    for (block in blocks) {
+        // Grab the CallExpression:
+        callCandidate = SubgraphWalker.flattenAST(block)
+            .filterIsInstance<CallExpression>()
+            .find { Demangle.demangle(it.name.localName).equals(name)}
+        if (callCandidate != null) break
+    }
+
+    return callCandidate
+}
+
+/*
+ * Given a list of blocks, looks for a reference to a vtable and returns the VariableDeclaration or null.
+ * This assumes that only one vtable is referenced within all the blocks.
+*/
+fun findVTableWithinBlocks(blocks: List<Block>): VariableDeclaration? {
+    var vtableReference: Reference? = null
+    for (block in blocks) {
+        vtableReference = SubgraphWalker.flattenAST(block)
+            .filterIsInstance<Reference>()
+            .find { it.name.contains("vtable") }
+        if (vtableReference != null) break
+    }
+
+    // Handle no vtable being found:
+    if (vtableReference == null) return null;
+
+    // Otherwise, grab the variabledecl:
+    return vtableReference.refersTo as VariableDeclaration
+}
+
+/*
+* Given a VarDecl to a vtable, return the FunctionDeclaration that is stored within.
+*/
+fun getVTableShim(vtable: VariableDeclaration?): FunctionDeclaration? {
+    // The vtable is stored as  <{ i8*, [16 x i8], i8*, [0 x i8] }>
+    // ..which is a fat pointer. The only thing we want here is the second pointer.
+    val references = vtable.nodes.filterIsInstance<Reference>()
+    if (references.isEmpty() || references.size < 2) return null
+    return references[1].refersTo as FunctionDeclaration
+}
+
+/*
+* Given a list of Blocks and an unmangled name, determine if the function is called
+* from somewhere within the blocks and return the declaration.
+*/
+fun findFunctionWithinBlocks(nodes: List<Node>, blocks: List<Block>, name: String): FunctionDeclaration? {
+    // If there was never a CallExpression found, that means this function was never called within
+    // the list of blocks we were given.
+    val functionCandidate: CallExpression = findCallWithinBlocks(blocks, name) ?: return null
+
+    // Then the FunctionDeclaration:
+    return findNodeByName<FunctionDeclaration>(nodes, functionCandidate.name.localName, exactName = true).first()
+}
+
+/*
+* CallExpression's parameters may contain a function pointer that isn't marked as FnOnce, Fn, FnMut, etc.
+* Example: call i32 @__rust_try(void (i8*)* @std::panicking::try::do_call)
+*
+* Normally, we would be able to get the function pointer from the ParameterDeclaration of rust_try's FunctionDecl.
+* However, the ParameterDeclaration doesn't hold anyway to grab the Reference.
+*
+* This uses the CallExpr instead and traverses through its references in hopes to find the given name.
+*/
+fun findFunctionWithinCallParams(call: CallExpression?, name: String): FunctionDeclaration? {
+    val reference = call.refs
+        .find { Demangle.demangle(it.name.localName) == name }
+
+    if (reference == null) return null
+
+    // From the reference, get the corresponding function decl.
+    return reference.refersTo as FunctionDeclaration
+}
+
+/*
+*
+*/
+fun getLHSFromCall(call: CallExpression): Set<VariableDeclaration> {
+    // Does not have a nextDFG if returning void:
+    return call.nextDFG as Set<VariableDeclaration>
+}
+
