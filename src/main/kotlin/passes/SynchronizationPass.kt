@@ -2,13 +2,17 @@ package passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
+import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
+import de.fraunhofer.aisec.cpg.graph.followNextEOG
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
 import graph.addLabel
+import graph.connectNodes
 import graph.findNodeByName
 import graph.getLHSFromCall
+import utils.Demangle
 
 // Rust-specific (for now; see note in LLVMThreadPass).
 // In the future, we would be looking for: (mutex-related)
@@ -35,10 +39,13 @@ class SynchronizationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             addLabel(lockCall, "Acquire")
         }
 
-//        var unlockCall = findNodeByName<CallExpression>(nodes, "std::sync::mutex::Mutex<T>::lock")
-//        if (unlockCall != null) {
-//            addLabel(unlockCall, "Acquire")
-//        }
-        println(vars);
+        val pathToUnlock = lockCall?.followNextEOG {
+            Demangle.demangle(it.start.name.localName).contains("core::ptr::drop_in_place<std::sync::mutex")
+        }
+
+        pathToUnlock?.forEach {
+            connectNodes(vars.first(), it.start, "SYNC")
+        }
+
     }
 }

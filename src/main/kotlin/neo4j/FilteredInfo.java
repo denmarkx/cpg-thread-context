@@ -18,7 +18,7 @@ public class FilteredInfo {
         "ASSIGNED_TYPES",
         "CANDIDATES",
         "LANGUAGE",
-//        "EOG",
+        "EOG",
         "SCOPE", // this is useful (maybe) but i cant stand it popping up in neo4j right now
         "TYPE",
         "TYPE_OBSERVERS"
