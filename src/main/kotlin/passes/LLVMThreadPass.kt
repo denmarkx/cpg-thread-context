@@ -51,7 +51,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
         // The main thread is different and always starts from std::rt::lang_start
         // https://stdrs.dev/nightly/x86_64-unknown-linux-gnu/src/std/rt.rs.html#159-172
-        val entryCallExpr = findNodeByName<CallExpression>(nodes, "std::rt::lang_start") ?: return
+        val entryCallExpr = findNodeByName<CallExpression>(nodes, "std::rt::lang_start").first()
 
         // only care about that first function: lang_start(main: fn() -> T, ...)
         // though the rest are argc, argv, and sigpipe.
@@ -70,7 +70,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
                 // c.name matches to a name within the IR, but
                 // the mangled suffix contains the hash which is important
-                var prevFuncDecl = findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true)
+                var prevFuncDecl: FunctionDeclaration? = findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true).first()
                 addLabel(prevFuncDecl!!, "ThreadStartDeclaration")
 
                 // Thread spawned from main
@@ -113,7 +113,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                             prevFuncDecl.calls.filter {
                                 !it.name.localName.startsWith("llvm.dbg")
                             }[0].name.localName,
-                            true)
+                            true).first()
                     }
                 }
 
@@ -124,7 +124,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
 
                 connectNodes(
-                    findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true)!!,
+                    findNodeByName<FunctionDeclaration>(nodes, c.name.localName, exactName = true).first(),
                     threadEntryDecl!!,
                     "THREAD_ENTRY"
                 )

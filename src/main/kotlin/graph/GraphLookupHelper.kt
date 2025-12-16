@@ -14,14 +14,14 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import utils.Demangle
 
-inline fun <reified T: Node> findNodeByName(nodes: List<Node>, name: String, exactName: Boolean = false): T? {
+inline fun <reified T: Node> findNodeByName(nodes: List<Node>, name: String, exactName: Boolean = false): List<T> {
     /*
     * Given an unmangled function name, return the corresponding object or null.
     * If exactName=true, name is expected to be mangled.
     */
     return nodes
         .filterIsInstance<T>()
-        .find {
+        .filter {
             (if (!exactName) {
                 Demangle.demangle(it.name.localName).equals(name)
             } else {
@@ -101,7 +101,7 @@ fun findFunctionWithinBlocks(nodes: List<Node>, blocks: List<Block>, name: Strin
     val functionCandidate: CallExpression = findCallWithinBlocks(blocks, name) ?: return null
 
     // Then the FunctionDeclaration:
-    return findNodeByName<FunctionDeclaration>(nodes, functionCandidate.name.localName, exactName = true)
+    return findNodeByName<FunctionDeclaration>(nodes, functionCandidate.name.localName, exactName = true).first()
 }
 
 /*
@@ -126,10 +126,8 @@ fun findFunctionWithinCallParams(call: CallExpression?, name: String): FunctionD
 /*
 *
 */
-fun getLHSFromCall(nodes: List<Node>, callName: String): Set<VariableDeclaration> {
+fun getLHSFromCall(call: CallExpression): Set<VariableDeclaration> {
     // Does not have a nextDFG if returning void:
-    // TODO: what happens if this matches multiple?
-    val call = findNodeByName<CallExpression>(nodes, callName)
-    return call?.nextDFG as Set<VariableDeclaration>
+    return call.nextDFG as Set<VariableDeclaration>
 }
 

@@ -10,4 +10,10 @@ fn main() {
         let mut guard = data.lock().unwrap();
         *guard = 6;
     }).join().unwrap();
+
+    let mut data = Arc::clone(&a);
+    let t2 = thread::spawn(move || {
+        let mut guard = data.lock().unwrap();
+        *guard = 7;
+    }).join().unwrap();
 }

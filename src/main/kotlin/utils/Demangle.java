@@ -7,7 +7,13 @@ package utils;
 // - Path is ended with 'E'
 // - Hashes come before the 'E' whose format is <length><hash>E
 
+import de.fraunhofer.aisec.cpg.graph.Node;
+
 public class Demangle {
+    public static String demangle(Node node) {
+        return demangle(node.getName().getLocalName());
+    }
+
     public static String demangle(String s) {
         String inner = "";
 

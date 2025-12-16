@@ -19,9 +19,6 @@ import utils.Demangle
 //    InitializeSRWLock, AcquireSRWLockExclusive, ReleaseSRWLockExclusive (win32)
 //    pthread_mutex_init, pthread_mutex_lock,... (UNIX)
 
-// TODO: Rust handles mutexes differently:
-//  it owns the data that is passed into its constructor (Mutex::new(<data>).
-
 @ExecuteLate
 class SynchronizationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     override fun cleanup() {}
@@ -29,23 +26,19 @@ class SynchronizationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     override fun accept(t: TranslationUnitDeclaration) {
         val nodes = SubgraphWalker.flattenAST(t)
 
-        // TODO: this only caters to one call.
-        val vars = getLHSFromCall(nodes, "std::sync::mutex::Mutex<T>::new")
-        if (vars.isEmpty()) return
-        addLabel(vars.first(), "Mutex")
+        findNodeByName<CallExpression>(nodes, "std::sync::mutex::Mutex<T>::new").forEach { call ->
+            val vars = getLHSFromCall(call)
+            addLabel(vars.first(), "Mutex")
 
-        var lockCall = findNodeByName<CallExpression>(nodes, "std::sync::mutex::Mutex<T>::lock")
-        if (lockCall != null) {
-            addLabel(lockCall, "Acquire")
+            findNodeByName<CallExpression>(nodes, "std::sync::mutex::Mutex<T>::lock").forEach { lock ->
+                addLabel(lock, "Acquire")
+                val pathToUnlock = lock.followNextEOG {
+                    Demangle.demangle(it.start).contains("core::ptr::drop_in_place<std::sync::mutex")
+                }
+                pathToUnlock?.forEach {
+                    connectNodes(vars.first(), it.start, "SYNC")
+                }
+            }
         }
-
-        val pathToUnlock = lockCall?.followNextEOG {
-            Demangle.demangle(it.start.name.localName).contains("core::ptr::drop_in_place<std::sync::mutex")
-        }
-
-        pathToUnlock?.forEach {
-            connectNodes(vars.first(), it.start, "SYNC")
-        }
-
     }
 }
