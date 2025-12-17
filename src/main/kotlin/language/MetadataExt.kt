@@ -97,10 +97,16 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
     setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
 }
 
-fun PrintLLVMVal(v: LLVMValueRef?) {
-    println(LLVMPrintValueToString(v).string)
+/*
+* Prints the LLVMValueRef instruction to stdout.
+*/
+fun LLVMValueRef.print() {
+    println(LLVMPrintValueToString(this).string)
 }
 
-fun PrintLLVMMD(v: LLVMMetadataRef?) {
-    println(LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, v)).string)
+/*
+* Prints the LLVMMetadataRef instruction to stdout.
+*/
+fun LLVMMetadataRef.print() {
+    println(LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, this)).string)
 }
