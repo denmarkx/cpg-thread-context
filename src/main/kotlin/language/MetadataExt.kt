@@ -1,8 +1,19 @@
 package language
 
+import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.ast
+import de.fraunhofer.aisec.cpg.graph.blocks
+import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.edges.astEdges
+import de.fraunhofer.aisec.cpg.graph.edges.dataflows
+import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.printDFG
+import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import graph.MetadataType
@@ -11,6 +22,55 @@ import graph.setMetadata
 import graph.setProperty
 import org.bytedeco.javacpp.SizeTPointer
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
+import utils.Demangle
+
+var deferredDebugSpill = mutableMapOf<ValueDeclaration, List<String>>()
+
+/*
+* When Node.applyMetadataExt is called, the <x>.dbg.spill reference
+* has no edges. This is because all the other passes haven't yet been run.
+*
+* This does two things: it looks for the real register (not the .dbg.spill).
+* Then, it kills all .dbg.spill nodes.
+*/
+fun handleDeferredDebugSpillNodes() {
+    deferredDebugSpill.forEach { (k, v) ->
+        // TODO: Despite the fact that k is received from x.refersTo, k.refs is empty.
+        // Luckily, REFERS_TO is accompanied with a USAGE edge.
+
+        val writeOp = k.usages.find { it.access == AccessValues.WRITE }
+        if (writeOp == null) return@forEach
+
+        // the next dfg is expected to be a unaryop
+        val unaryOp = writeOp.nextDFG.find { it is UnaryOperator } as UnaryOperator
+
+        // There's two things that can happen here.
+        // Either a literal is stored directly within the register
+        // Or we're storing a copy of another register.
+
+        // If we are storing a literal, a regular non-spill register does not exist.
+        // In which case there is nothing really we can do.
+        // However, this doesn't really matter because consider:
+        //   %x.dbg.spill = alloca [4 x i8] align 4
+        //   store i32 5, ptr %x.dbg.spill, ....
+        //
+        // The literal stored within the register is guaranteed to also be directly
+        // stored within the "real" register with the same dbg info attached:
+        //   store i32 5, ptr %tmp1, align 4, !dbg !1356
+
+        val registerRef = unaryOp.prevDFG.find { it is Reference && it.access == AccessValues.READ } as Reference?
+        if (registerRef == null) return@forEach
+
+        val finalRegisterDecl = registerRef.refersTo as ValueDeclaration
+        finalRegisterDecl.setLocationInfo(v[0], v[1].toInt())
+
+        // propagate the loc info to all of this node's references
+        // since .refs is sometimes empty, we have to use .usages
+        finalRegisterDecl.usages.forEach {
+            it.setLocationInfo(v[0], v[1].toInt())
+        }
+    }
+}
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
     if (LLVMHasMetadata(instr) == 0) return
@@ -18,13 +78,45 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
 
     // Only thing we're interested in is filename and line.
     val filenamePtr = LLVMGetDebugLocFilename(instr, IntArray(20)) ?: return
-    val line = LLVMGetDebugLocLine(instr)
+    var line = LLVMGetDebugLocLine(instr)
     var filename = filenamePtr.string
 
-    // Rust lib paths are /rustc/sha\library\<xxx>\<xxx>.rs
-    if (filename.startsWith("/rustc")) {
-        val split = filename.split("library\\")
-        filename = split[split.size - 1]
+    // llvm.dbg.declare provided metadata for variables on the stack.
+    // The first arg is the register, but this can either be the direct register
+    // or a ".dbg.spill" register. If it's the latter, then
+    // somewhere above this instruction is a store instruction for storing the original
+    // register into the .dbg.spill one.
+
+    // The only exception to that are literals. Those will be directly stored within the dbg.spill
+    // register and are sort of useless.
+    if (this.getTrueName() == "llvm.dbg.declare") {
+//        scheduleDeletion(this)
+        if (this is CallExpression) {
+            val register = this.arguments[0] as Reference
+//            scheduleDeletion(register)
+
+            val dbgInfo = LLVMValueAsMetadata(LLVMGetOperand(instr, 1)) // !DILocalVariable
+
+            val diFile = LLVMDIVariableGetFile(dbgInfo)
+            filename = LLVMDIFileGetFilename(diFile, IntArray(50)).string
+            line = LLVMDIVariableGetLine(dbgInfo)
+
+            // Case: direct reference.
+            if (!register.getTrueName().contains(".dbg.spill")) {
+                val variableDecl = register.refersTo
+                variableDecl?.setLocationInfo(filename, line)
+            }
+
+            // Case 2: .dbg.spill.
+            else {
+                // this is probably not connected to anything yet, so it is deferred.
+                deferredDebugSpill[register.refersTo as ValueDeclaration] = listOf<String>(filename, line.toString())
+
+                // TODO: this probably doesn't have to be done since the plan is to kill .dbg.spill
+                val variableDecl = register.refersTo
+                variableDecl?.setLocationInfo(filename, line)
+            }
+        }
     }
 
     // CallExpressions may contain additional operand bundles.
@@ -43,7 +135,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
             if (this.name.localName == "llvm.dbg.declare") {
-                scheduleDeletion(this)
+//                scheduleDeletion(this)
 
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
@@ -90,11 +182,28 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         }
     }
 
+    // Rust lib paths are /rustc/sha\library\<xxx>\<xxx>.rs
+    if (filename.startsWith("/rustc")) {
+        val split = filename.split("library\\")
+        filename = split[split.size - 1]
+    }
+
     // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is main
     // ...so anything that is not prefixed by /rustc/ is assumed to be "user-code"
+    setLocationInfo(filename, line)
+}
+
+fun Node.setLocationInfo(filename: String, line: Int) {
     setProperty(this, "filename", filename)
     setProperty(this, "line", line.toString())
     setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
+}
+
+/*
+* Returns the demangled name of the Node.
+*/
+fun Node.getTrueName(): String {
+    return Demangle.demangle(this.name.localName)
 }
 
 /*

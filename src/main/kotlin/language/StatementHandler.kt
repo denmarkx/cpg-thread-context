@@ -1171,7 +1171,6 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         callee.applyMetadataExt(calledFunc, frontend)
 
         val callExpr = newCallExpression(callee, calledFuncName, false, rawNode = instr)
-        callExpr.applyMetadataExt(instr, frontend)
 
         val callFuncNameDemangled = Demangle.demangle(callExpr.name.localName)
 
@@ -1185,6 +1184,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             }
             idx++
         }
+        callExpr.applyMetadataExt(instr, frontend)
 
         if (instr.opCode == LLVMInvoke) {
             // For the "invoke" instruction, the call is surrounded by a try statement which also
