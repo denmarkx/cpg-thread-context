@@ -47,6 +47,7 @@ import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
+import java.io.FileReader
 
 /**
  * Because we are using the C LLVM API, there are two possibly AST nodes that we need to consider:
@@ -83,7 +84,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         // these will be filled by our create and parse functions later and will be passed as
         // pointer
         val mod = LLVMModuleRef()
-        val buf = LLVMMemoryBufferRef()
 
         // create a new LLVM context
         ctxRef = LLVMContextCreate()
@@ -95,20 +95,50 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         // allocate a buffer for a possible error message
         val errorMessage = ByteBuffer.allocate(10000)
 
-        var result =
-            LLVMCreateMemoryBufferWithContentsOfFile(
-                BytePointer(file.toPath().toString()),
-                buf,
-                errorMessage,
+        // LLVMParseIRInContext will fail because of the debug record.
+        // ..because of this, I replace it with the intrinsic
+        val reader = FileReader(file)
+        val lines = reader.readLines().toMutableList()
+
+        // this is done (mostly) in accordance with
+        // https://llvm.org/docs/RemoveDIsDebugInfo.html#textual-ir-changes
+        lines
+            .forEachIndexed { i, l ->
+                if (!l.contains("#dbg_declare")) return@forEachIndexed
+                var newLine = ""
+                val split =
+                    l.replace("#dbg_declare", "@llvm.dbg.declare")
+                    .split(',')
+                var dbg = ""
+                split.forEachIndexed { j, n ->
+                    var arg = n
+                    if (j == 3) {
+                        dbg = arg.removeSuffix(")")
+                        return@forEachIndexed
+                    }
+                    if (j == 0) arg = arg.replace("ptr ", "metadata ptr ")
+                    if (j > 0) arg = "metadata $arg"
+                    if (j < 2) arg += ','
+                    newLine += arg
+                }
+                lines[i] = "call void $newLine), !dbg $dbg"
+            }
+
+        val text = lines.joinToString("\n")
+        val buf =
+            LLVMCreateMemoryBufferWithMemoryRangeCopy(
+                text,
+                text.length.toLong(),
+                file.name,
             )
-        if (result != 0) {
+        if (buf.isNull) {
             // something went wrong
             val errorMsg = String(errorMessage.array())
             LLVMContextDispose(ctxRef)
             throw TranslationException("Could not create memory buffer: $errorMsg")
         }
 
-        result = LLVMParseIRInContext(ctxRef, buf, mod, errorMessage)
+        val result = LLVMParseIRInContext(ctxRef, buf, mod, errorMessage)
         if (result != 0) {
             // something went wrong
             val errorMsg = String(errorMessage.array())
@@ -126,6 +156,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
         // loop through globals
         var global = LLVMGetFirstGlobal(mod)
+        println(global)
         while (global != null) {
             // try to parse the variable (declaration)
             val declaration = declarationHandler.handle(global)

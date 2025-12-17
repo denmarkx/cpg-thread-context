@@ -123,7 +123,7 @@
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>llvm</artifactId>
-            <version>17.0.6-1.5.10</version>
+            <version>20.1.7-1.5.12</version>
         </dependency>
     </dependencies>
 
