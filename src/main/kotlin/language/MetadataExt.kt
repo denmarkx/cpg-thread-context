@@ -12,6 +12,7 @@ import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.printDFG
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
@@ -35,14 +36,27 @@ var deferredDebugSpill = mutableMapOf<ValueDeclaration, List<String>>()
 */
 fun handleDeferredDebugSpillNodes() {
     deferredDebugSpill.forEach { (k, v) ->
+
+        // From a ValueDecl, there exists a regular declaration and an initializer.
+        scheduleDeletion(k)
+        scheduleDeletion(k.astParent)
+
+        val initializer = k.nodes.find{ it is NewArrayExpression} as NewArrayExpression
+        scheduleDeletion(initializer)
+        scheduleDeletion(initializer.dimensions)
+
+        // Kill all dbg.spill references:
+        scheduleDeletion(k.usages)
+
         // TODO: Despite the fact that k is received from x.refersTo, k.refs is empty.
         // Luckily, REFERS_TO is accompanied with a USAGE edge.
-
         val writeOp = k.usages.find { it.access == AccessValues.WRITE }
         if (writeOp == null) return@forEach
 
         // the next dfg is expected to be a unaryop
         val unaryOp = writeOp.nextDFG.find { it is UnaryOperator } as UnaryOperator
+        scheduleDeletion(unaryOp)
+        scheduleDeletion(unaryOp.astParent)
 
         // There's two things that can happen here.
         // Either a literal is stored directly within the register
@@ -73,6 +87,7 @@ fun handleDeferredDebugSpillNodes() {
 }
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
+    if (this.getTrueName() == "llvm.dbg.declare") scheduleDeletion(this)
     if (LLVMHasMetadata(instr) == 0) return
     if (LLVMInstructionGetDebugLoc(instr) == null) return
 
@@ -90,11 +105,8 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
     // The only exception to that are literals. Those will be directly stored within the dbg.spill
     // register and are sort of useless.
     if (this.getTrueName() == "llvm.dbg.declare") {
-//        scheduleDeletion(this)
         if (this is CallExpression) {
             val register = this.arguments[0] as Reference
-//            scheduleDeletion(register)
-
             val dbgInfo = LLVMValueAsMetadata(LLVMGetOperand(instr, 1)) // !DILocalVariable
 
             val diFile = LLVMDIVariableGetFile(dbgInfo)
@@ -111,10 +123,6 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             else {
                 // this is probably not connected to anything yet, so it is deferred.
                 deferredDebugSpill[register.refersTo as ValueDeclaration] = listOf<String>(filename, line.toString())
-
-                // TODO: this probably doesn't have to be done since the plan is to kill .dbg.spill
-                val variableDecl = register.refersTo
-                variableDecl?.setLocationInfo(filename, line)
             }
         }
     }
@@ -135,8 +143,6 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
             if (this.name.localName == "llvm.dbg.declare") {
-//                scheduleDeletion(this)
-
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
 

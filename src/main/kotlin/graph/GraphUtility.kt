@@ -3,7 +3,7 @@ import de.fraunhofer.aisec.cpg.graph.Node
 
 data class Relationship(val start: Node, val end: Node)
 
-private val nodeData: MutableMap<Node, NodeData> = mutableMapOf()
+private val nodeData: MutableMap<Node?, NodeData> = mutableMapOf()
 private val edgeData: MutableMap<String, MutableSet<Relationship>> = mutableMapOf()
 
 /*
@@ -11,7 +11,7 @@ private val edgeData: MutableMap<String, MutableSet<Relationship>> = mutableMapO
  * NODES
 ==========================================
 */
-fun scheduleDeletion(node: Node) {
+fun scheduleDeletion(node: Node?) {
     registerNode(node)
     nodeData[node]!!.deleteScheduled = true
 }
@@ -145,12 +145,12 @@ fun getID(node: Node) : String {
 * INTERNAL
 */
 
-private fun registerNode(node: Node) {
+private fun registerNode(node: Node?) {
     if (!nodeData.containsKey(node)) {
         nodeData[node] = NodeData()
     }
 }
 
-private fun hasNode(node: Node) : Boolean {
+private fun hasNode(node: Node?) : Boolean {
     return nodeData.containsKey(node)
 }
