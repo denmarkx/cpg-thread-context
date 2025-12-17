@@ -43,7 +43,6 @@ import de.fraunhofer.aisec.cpg.passes.configuration.RegisterExtraPass
 import de.fraunhofer.aisec.cpg.sarif.PhysicalLocation
 import java.io.File
 import java.nio.ByteBuffer
-import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
@@ -102,29 +101,25 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
         // this is done (mostly) in accordance with
         // https://llvm.org/docs/RemoveDIsDebugInfo.html#textual-ir-changes
+        val record = Regex("#dbg_declare\\(([^,]+), (!\\d+), (!\\w+\\((?:[^\\)]+)?\\)), (!\\d+)\\)")
         lines
             .forEachIndexed { i, l ->
                 if (!l.contains("#dbg_declare")) return@forEachIndexed
-                var newLine = ""
-                val split =
-                    l.replace("#dbg_declare", "@llvm.dbg.declare")
-                    .split(',')
-                var dbg = ""
-                split.forEachIndexed { j, n ->
-                    var arg = n
-                    if (j == 3) {
-                        dbg = arg.removeSuffix(")")
-                        return@forEachIndexed
-                    }
-                    if (j == 0) arg = arg.replace("ptr ", "metadata ptr ")
-                    if (j > 0) arg = "metadata $arg"
-                    if (j < 2) arg += ','
-                    newLine += arg
-                }
-                lines[i] = "call void $newLine), !dbg $dbg"
+                val match = record.find(l) ?: return@forEachIndexed
+                val groups = match.groupValues
+
+                lines[i] = "  call void @llvm.dbg.declare(metadata ${groups[1]}, metadata ${groups[2]}, " +
+                    "metadata ${groups[3]}), !dbg ${groups[4]}"
             }
 
-        val text = lines.joinToString("\n")
+        var text = lines.joinToString("\n")
+        text += "declare void @llvm.dbg.declare(metadata, metadata, metadata)"
+
+        // Another thing that happens is that nuw for getelementptr and trunc aren't accepted.
+        // this is a bit weird since it's valid in llvm 20
+        text = text.replace("getelementptr inbounds nuw", "getelementptr inbounds")
+        text = text.replace("trunc nuw", "trunc")
+
         val buf =
             LLVMCreateMemoryBufferWithMemoryRangeCopy(
                 text,
@@ -142,6 +137,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         if (result != 0) {
             // something went wrong
             val errorMsg = String(errorMessage.array())
+            println(errorMsg)
             LLVMContextDispose(ctxRef)
             throw TranslationException("Could not parse IR: $errorMsg")
         }
@@ -156,7 +152,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
         // loop through globals
         var global = LLVMGetFirstGlobal(mod)
-        println(global)
         while (global != null) {
             // try to parse the variable (declaration)
             val declaration = declarationHandler.handle(global)

@@ -50,7 +50,6 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
     }
 
     private fun handleValue(value: LLVMValueRef): Expression {
-        println("handlevalue")
         val expression = when (val kind = LLVMGetValueKind(value)) {
             LLVMConstantExprValueKind -> handleConstantExprValueKind(value)
             LLVMConstantArrayValueKind,
