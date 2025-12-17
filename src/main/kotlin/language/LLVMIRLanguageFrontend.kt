@@ -234,13 +234,10 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
                     val elementType = typeOf(LLVMGetElementType(typeRef), alreadyVisited)
                     elementType.array()
                 }
-                // MIGRATION TODO: pointers no longer are explicitly typed
-                // is this still needed?
-//                LLVMPointerTypeKind -> {
-//                    println("ptr type")
-//                    val elementType = typeOf(LLVMGetElementType(typeRef), alreadyVisited)
-//                    elementType.pointer()
-//                }
+                LLVMPointerTypeKind -> {
+                    // LLVM 17+, no more typed pointers.
+                    PointerType(AutoType(language), PointerType.PointerOrigin.POINTER)
+                }
                 LLVMStructTypeKind -> {
                     val record = declarationHandler.handleStructureType(typeRef, alreadyVisited)
                     record.toType()
