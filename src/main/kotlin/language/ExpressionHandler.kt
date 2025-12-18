@@ -49,7 +49,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
         map.put(LLVMValueRef::class.java) { handleValue(it) }
     }
 
-    private fun handleValue(value: LLVMValueRef): Expression {
+    private fun handleValue(value: LLVMValueRef): Expression? {
         val expression = when (val kind = LLVMGetValueKind(value)) {
             LLVMConstantExprValueKind -> handleConstantExprValueKind(value)
             LLVMConstantArrayValueKind,
@@ -91,12 +91,7 @@ class ExpressionHandler(lang: LLVMIRLanguageFrontend) :
                 if (str.find { c -> c == '%' } != null) {
                     return frontend.getOperandValueAtIndex(value, 0)
                 }
-
-                return newProblemExpression(
-                    "Metadata or ASM value kind not supported yet",
-                    ProblemNode.ProblemType.TRANSLATION,
-                    rawNode = value,
-                )
+                return null
             }
             else -> {
                 // old stuff from getOperandValue, needs to be refactored to the `when` above
