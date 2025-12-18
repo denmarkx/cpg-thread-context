@@ -105,9 +105,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
 
         // return types are a bit tricky, because the type of the function is a pointer to the
         // function type, which then has the return type in it
-        val funcPtrType = LLVMTypeOf(func)
-        val funcType = LLVMGetElementType(funcPtrType)
-        val returnType = LLVMGetReturnType(funcType)
+        val returnType = LLVMGetGEPSourceElementType(func)
 
         functionDeclaration.type = frontend.typeOf(returnType)
 

@@ -43,10 +43,10 @@ import de.fraunhofer.aisec.cpg.passes.configuration.RegisterExtraPass
 import de.fraunhofer.aisec.cpg.sarif.PhysicalLocation
 import java.io.File
 import java.nio.ByteBuffer
-import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
+import java.io.FileReader
 
 /**
  * Because we are using the C LLVM API, there are two possibly AST nodes that we need to consider:
@@ -83,35 +83,61 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         // these will be filled by our create and parse functions later and will be passed as
         // pointer
         val mod = LLVMModuleRef()
-        val buf = LLVMMemoryBufferRef()
 
         // create a new LLVM context
         ctxRef = LLVMContextCreate()
 
         // disable opaque pointers, until all necessary new functions are available in the C API.
         // See https://llvm.org/docs/OpaquePointers.html
-        LLVMContextSetOpaquePointers(ctxRef, 0)
+//        LLVMContextSetOpaquePointers(ctxRef, 0)
 
         // allocate a buffer for a possible error message
         val errorMessage = ByteBuffer.allocate(10000)
 
-        var result =
-            LLVMCreateMemoryBufferWithContentsOfFile(
-                BytePointer(file.toPath().toString()),
-                buf,
-                errorMessage,
+        // LLVMParseIRInContext will fail because of the debug record.
+        // ..because of this, I replace it with the intrinsic
+        val reader = FileReader(file)
+        val lines = reader.readLines().toMutableList()
+
+        // this is done (mostly) in accordance with
+        // https://llvm.org/docs/RemoveDIsDebugInfo.html#textual-ir-changes
+        val record = Regex("#dbg_declare\\(([^,]+), (!\\d+), (!\\w+\\((?:[^\\)]+)?\\)), (!\\d+)\\)")
+        lines
+            .forEachIndexed { i, l ->
+                if (!l.contains("#dbg_declare")) return@forEachIndexed
+                val match = record.find(l) ?: return@forEachIndexed
+                val groups = match.groupValues
+
+                lines[i] = "  call void @llvm.dbg.declare(metadata ${groups[1]}, metadata ${groups[2]}, " +
+                    "metadata ${groups[3]}), !dbg ${groups[4]}"
+            }
+
+        var text = lines.joinToString("\n")
+        text += "declare void @llvm.dbg.declare(metadata, metadata, metadata)"
+
+        // Another thing that happens is that nuw for getelementptr and trunc aren't accepted.
+        // this is a bit weird since it's valid in llvm 20
+        text = text.replace("getelementptr inbounds nuw", "getelementptr inbounds")
+        text = text.replace("trunc nuw", "trunc")
+
+        val buf =
+            LLVMCreateMemoryBufferWithMemoryRangeCopy(
+                text,
+                text.length.toLong(),
+                file.name,
             )
-        if (result != 0) {
+        if (buf.isNull) {
             // something went wrong
             val errorMsg = String(errorMessage.array())
             LLVMContextDispose(ctxRef)
             throw TranslationException("Could not create memory buffer: $errorMsg")
         }
 
-        result = LLVMParseIRInContext(ctxRef, buf, mod, errorMessage)
+        val result = LLVMParseIRInContext(ctxRef, buf, mod, errorMessage)
         if (result != 0) {
             // something went wrong
             val errorMsg = String(errorMessage.array())
+            println(errorMsg)
             LLVMContextDispose(ctxRef)
             throw TranslationException("Could not parse IR: $errorMsg")
         }
@@ -209,8 +235,8 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
                     elementType.array()
                 }
                 LLVMPointerTypeKind -> {
-                    val elementType = typeOf(LLVMGetElementType(typeRef), alreadyVisited)
-                    elementType.pointer()
+                    // LLVM 17+, no more typed pointers.
+                    PointerType(AutoType(language), PointerType.PointerOrigin.POINTER)
                 }
                 LLVMStructTypeKind -> {
                     val record = declarationHandler.handleStructureType(typeRef, alreadyVisited)
