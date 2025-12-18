@@ -4,6 +4,7 @@ import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.ast
 import de.fraunhofer.aisec.cpg.graph.blocks
+import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.edges.astEdges
@@ -14,6 +15,7 @@ import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.SubscriptExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
@@ -36,7 +38,6 @@ var deferredDebugSpill = mutableMapOf<ValueDeclaration, List<String>>()
 */
 fun handleDeferredDebugSpillNodes() {
     deferredDebugSpill.forEach { (k, v) ->
-
         // From a ValueDecl, there exists a regular declaration and an initializer.
         scheduleDeletion(k)
         scheduleDeletion(k.astParent)
@@ -48,41 +49,64 @@ fun handleDeferredDebugSpillNodes() {
         // Kill all dbg.spill references:
         scheduleDeletion(k.usages)
 
-        // TODO: Despite the fact that k is received from x.refersTo, k.refs is empty.
-        // Luckily, REFERS_TO is accompanied with a USAGE edge.
-        val writeOp = k.usages.find { it.access == AccessValues.WRITE }
-        if (writeOp == null) return@forEach
+        // For READ references, there exists a possibility that this can be used for getelementptr.
+        // For this, check the DFG-> until a VarDecl. This VarDecl should be the getelementptr
+        // and it should also have a write reference.
+        k.usages
+            .filter { it.access == AccessValues.READ && it.nextDFG.find { e -> e is SubscriptExpression } != null}
+            .forEach {
+                it.collectAllNextDFGPaths().forEach { path ->
+                    path.nodes.forEach { e ->
+                        scheduleDeletion(e)
+                        scheduleDeletion(e.astParent)
+                    }
 
-        // the next dfg is expected to be a unaryop
-        val unaryOp = writeOp.nextDFG.find { it is UnaryOperator } as UnaryOperator
-        scheduleDeletion(unaryOp)
-        scheduleDeletion(unaryOp.astParent)
+                    // The end of this path should be a vardecl.
+                    val pathEnd = path.nodes.last()
+                    if (pathEnd !is ValueDeclaration) return@forEach
+                    handleTrueRegisterRef(pathEnd, v)
+                }
+            }
 
-        // There's two things that can happen here.
-        // Either a literal is stored directly within the register
-        // Or we're storing a copy of another register.
+        handleTrueRegisterRef(k, v)
+    }
+}
 
-        // If we are storing a literal, a regular non-spill register does not exist.
-        // In which case there is nothing really we can do.
-        // However, this doesn't really matter because consider:
-        //   %x.dbg.spill = alloca [4 x i8] align 4
-        //   store i32 5, ptr %x.dbg.spill, ....
-        //
-        // The literal stored within the register is guaranteed to also be directly
-        // stored within the "real" register with the same dbg info attached:
-        //   store i32 5, ptr %tmp1, align 4, !dbg !1356
+private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
+    // TODO: Despite the fact that k is received from x.refersTo, k.refs is empty.
+    // Luckily, REFERS_TO is accompanied with a USAGE edge.
+    val ref = value.usages.find { it.access == AccessValues.WRITE } ?: return
+    scheduleDeletion(ref)
 
-        val registerRef = unaryOp.prevDFG.find { it is Reference && it.access == AccessValues.READ } as Reference?
-        if (registerRef == null) return@forEach
+    val unaryOp = ref.nextDFG.find { it is UnaryOperator } as UnaryOperator
+    scheduleDeletion(unaryOp)
+    scheduleDeletion(unaryOp.astParent)
 
-        val finalRegisterDecl = registerRef.refersTo as ValueDeclaration
-        finalRegisterDecl.setLocationInfo(v[0], v[1].toInt())
+    // There's two things that can happen here.
+    // Either a literal is stored directly within the register
+    // Or we're storing a copy of another register.
 
-        // propagate the loc info to all of this node's references
-        // since .refs is sometimes empty, we have to use .usages
-        finalRegisterDecl.usages.forEach {
-            it.setLocationInfo(v[0], v[1].toInt())
-        }
+    // If we are storing a literal, a regular non-spill register does not exist.
+    // In which case there is nothing really we can do.
+    // However, this doesn't really matter because consider:
+    //   %x.dbg.spill = alloca [4 x i8] align 4
+    //   store i32 5, ptr %x.dbg.spill, ....
+    //
+    // The literal stored within the register is guaranteed to also be directly
+    // stored within the "real" register with the same dbg info attached:
+    //   store i32 5, ptr %tmp1, align 4, !dbg !1356
+
+    val registerRef = unaryOp.prevDFG.find { it is Reference && it.access == AccessValues.READ } as Reference?
+    if (registerRef == null) return
+    scheduleDeletion(registerRef)
+
+    val register = registerRef.refersTo as ValueDeclaration
+    register.setLocationInfo(v[0], v[1].toInt())
+
+    // propagate the loc info to all of this node's references
+    // since .refs is sometimes empty, we have to use .usages
+    register.usages.forEach {
+        it.setLocationInfo(v[0], v[1].toInt())
     }
 }
 
