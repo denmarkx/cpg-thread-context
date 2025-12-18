@@ -2,16 +2,9 @@ package language
 
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
-import de.fraunhofer.aisec.cpg.graph.ast
-import de.fraunhofer.aisec.cpg.graph.blocks
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.edges.astEdges
-import de.fraunhofer.aisec.cpg.graph.edges.dataflows
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.printDFG
-import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
@@ -20,6 +13,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import graph.MetadataType
+import graph.addLabel
 import graph.scheduleDeletion
 import graph.setMetadata
 import graph.setProperty
@@ -102,6 +96,7 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
 
     val register = registerRef.refersTo as ValueDeclaration
     register.setLocationInfo(v[0], v[1].toInt())
+    addLabel(register, "TrackedNode")
 
     // propagate the loc info to all of this node's references
     // since .refs is sometimes empty, we have to use .usages
