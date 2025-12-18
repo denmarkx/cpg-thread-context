@@ -7,6 +7,7 @@ import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.SubscriptExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
@@ -125,6 +126,12 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
     // register and are sort of useless.
     if (this.getTrueName() == "llvm.dbg.declare") {
         if (this is CallExpression) {
+            // handle metadata ptr undef
+            if (this.arguments[0] is ProblemExpression) {
+                scheduleDeletion(this.arguments[0])
+                return
+            }
+
             val register = this.arguments[0] as Reference
             val dbgInfo = LLVMValueAsMetadata(LLVMGetOperand(instr, 1)) // !DILocalVariable
 

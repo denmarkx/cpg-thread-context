@@ -53,6 +53,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     override fun cleanup() {}
 
     override fun accept(t: TranslationUnitDeclaration) {
+        return // TODO
         nodes = SubgraphWalker.flattenAST(t)
 
         // The main thread is different and always starts from std::rt::lang_start
