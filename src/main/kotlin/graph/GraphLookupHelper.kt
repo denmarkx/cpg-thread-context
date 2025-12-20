@@ -5,6 +5,7 @@ import de.fraunhofer.aisec.cpg.graph.ast
 import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.get
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.returns
@@ -12,6 +13,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
+import language.getTrueName
 import utils.Demangle
 
 inline fun <reified T: Node> findNodeByName(nodes: List<Node>, name: String, exactName: Boolean = false): List<T> {
@@ -46,15 +48,14 @@ fun getFunctionDeclarationFromBlock(block: Block) : FunctionDeclaration? {
  * Given a list of Blocks and an unmangled name, return the CallExpression
  * if found within the blocks.
 */
-fun findCallWithinBlocks(blocks: List<Block>, name: String): CallExpression? {
-    var callCandidate: CallExpression? = null
+fun findCallWithinBlocks(blocks: List<Block>, name: String): Set<CallExpression> {
+    var callCandidate = mutableSetOf<CallExpression>()
 
     for (block in blocks) {
         // Grab the CallExpression:
-        callCandidate = SubgraphWalker.flattenAST(block)
+        callCandidate += SubgraphWalker.flattenAST(block)
             .filterIsInstance<CallExpression>()
-            .find { Demangle.demangle(it.name.localName).equals(name)}
-        if (callCandidate != null) break
+            .filter { Demangle.demangle(it.name.localName).equals(name)} as MutableList<CallExpression>
     }
 
     return callCandidate
@@ -92,19 +93,6 @@ fun getVTableShim(vtable: VariableDeclaration?): FunctionDeclaration? {
 }
 
 /*
-* Given a list of Blocks and an unmangled name, determine if the function is called
-* from somewhere within the blocks and return the declaration.
-*/
-fun findFunctionWithinBlocks(nodes: List<Node>, blocks: List<Block>, name: String): FunctionDeclaration? {
-    // If there was never a CallExpression found, that means this function was never called within
-    // the list of blocks we were given.
-    val functionCandidate: CallExpression = findCallWithinBlocks(blocks, name) ?: return null
-
-    // Then the FunctionDeclaration:
-    return findNodeByName<FunctionDeclaration>(nodes, functionCandidate.name.localName, exactName = true).first()
-}
-
-/*
 * CallExpression's parameters may contain a function pointer that isn't marked as FnOnce, Fn, FnMut, etc.
 * Example: call i32 @__rust_try(void (i8*)* @std::panicking::try::do_call)
 *
@@ -131,3 +119,41 @@ fun getLHSFromCall(call: CallExpression): Set<VariableDeclaration> {
     return call.nextDFG as Set<VariableDeclaration>
 }
 
+/*
+ * Returns the function path from CallExpr -> name
+*/
+fun CallExpression.resolveUntilHit(name: String): List<CallExpression> {
+    val route = mutableListOf<CallExpression>()
+
+    fun traverse(current: FunctionDeclaration, visited: MutableList<Node>): Boolean {
+        if (current.getTrueName() == name) return true
+        visited.add(current)
+
+        current.calls.forEach {
+            it.invokes.forEach { f ->
+                if (f !in visited) {
+                    if (traverse(f, visited)) {
+                        route.addFirst(it)
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    traverse(this.invokes.first(), mutableListOf())
+    route.addFirst(this)
+    return route
+}
+
+/*
+ * Returns the function path from FuncDecl -> name
+*/
+fun FunctionDeclaration.resolveUntilHit(name: String): List<CallExpression> {
+    this.calls.forEach {
+        val candidate = it.resolveUntilHit(name)
+        if (candidate.size >= 2) return candidate
+    }
+    return listOf()
+}

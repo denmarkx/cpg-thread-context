@@ -103,6 +103,11 @@ fun getLabels(node: Node) : Set<String> {
     return nodeData[node]!!.labelData.toSet()
 }
 
+fun getNodesWithLabel(label: String) : Set<Node> {
+    val filtered = nodeData.filter { it.value.labelData.contains(label) }
+    return filtered.keys as Set<Node>
+}
+
 /*
 ==========================================
  * PROPERTIES
