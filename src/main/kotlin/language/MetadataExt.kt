@@ -3,7 +3,9 @@ package language
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
+import de.fraunhofer.aisec.cpg.graph.get
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
@@ -109,6 +111,29 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
     if (this.getTrueName() == "llvm.dbg.declare") scheduleDeletion(this)
     if (LLVMHasMetadata(instr) == 0) return
+
+    // LLVMInstructionGetDebugLoc on a FuncDecl will return null even though they may have a dbg loc..
+    // The dbg location here is expressed as metadata that is NOT a dbg loc
+    if (this is FunctionDeclaration) {
+        val mde = LLVMInstructionGetAllMetadataOtherThanDebugLoc(instr, SizeTPointer(64))
+        val entry = LLVMValueMetadataEntriesGetMetadata(mde, 0)
+        if (entry.isNull) return
+
+        // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.
+        // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the main entry.
+        val dispStr = LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, entry)).string
+        if (dispStr.contains("DISPFlagMainSubprogram")) {
+            addLabel(this, "MainFunctionDeclaration")
+        }
+
+        // Everything else can get the filename and line as normal:
+        val diFile = LLVMDIScopeGetFile(entry)
+        val filename = LLVMDIFileGetFilename(diFile, IntArray(50)).string
+        val line = LLVMDISubprogramGetLine(entry)
+        this.setLocationInfo(filename, line)
+        return
+    }
+
     if (LLVMInstructionGetDebugLoc(instr) == null) return
 
     // Only thing we're interested in is filename and line.
