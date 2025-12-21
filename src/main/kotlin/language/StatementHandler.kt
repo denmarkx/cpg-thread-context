@@ -29,10 +29,13 @@ import de.fraunhofer.aisec.cpg.frontends.Handler
 import de.fraunhofer.aisec.cpg.frontends.TranslationException
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.Node.Companion
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.edges.flows.Invoke
 import de.fraunhofer.aisec.cpg.graph.statements.*
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.*
+import de.fraunhofer.aisec.cpg.graph.types.FunctionPointerType
 import de.fraunhofer.aisec.cpg.graph.types.ObjectType
 import de.fraunhofer.aisec.cpg.graph.types.PointerType
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
@@ -42,6 +45,7 @@ import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
+import passes.deferredFunctionPointers
 import utils.Demangle
 import java.nio.IntBuffer
 
@@ -1169,6 +1173,14 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         callee.applyMetadataExt(calledFunc, frontend)
 
         val callExpr = newCallExpression(callee, calledFuncName, false, rawNode = instr)
+
+        if (LLVMIsAFunction(calledFunc) == null) {
+            // calledFunc is NOT a function in cases of a function pointer or asm call.
+            // for this reason only, this call expression will always lack an INVOKES edge which breaks traversal.
+            // (while unconfirmed), the node connected from calledFunc via OPERATOR_BASE is also connected to
+            // a FunctionDeclaration by REFERS_TO/USAGE/DFG. The FuncDecl node is then connected to calledFunc via DFG/INVOKES.
+            deferredFunctionPointers.add(Pair(callee, callExpr))
+        }
 
         val callFuncNameDemangled = Demangle.demangle(callExpr.name.localName)
 

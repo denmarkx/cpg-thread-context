@@ -2,10 +2,14 @@ import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
 import de.fraunhofer.aisec.cpg.passes.DFGPass
+import de.fraunhofer.aisec.cpg.passes.DynamicInvokeResolver
+import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import language.LLVMIRLanguage
+import language.LLVMIRLanguageFrontend
 import passes.LLVMThreadPass
 import neo4j.persistGraph
 import passes.FunctionDeclarationPass
+import passes.FunctionPtrResolver
 import passes.MemorySpacePass
 import passes.ScopePass
 import passes.SynchronizationPass
@@ -27,7 +31,6 @@ fun main() {
 
     val inferenceConfig = InferenceConfiguration
         .builder()
-        .inferRecords(true)
         .build()
 
     val translationConfig = TranslationConfiguration
@@ -35,11 +38,12 @@ fun main() {
         .inferenceConfiguration(inferenceConfig)
         .defaultPasses()
         .registerLanguage<LLVMIRLanguage>()
-        .registerPass<LLVMThreadPass>()
-        .registerPass<FunctionDeclarationPass>()
-        .registerPass<ScopePass>()
-        .registerPass<MemorySpacePass>()
-        .registerPass<SynchronizationPass>()
+//        .registerPass<LLVMThreadPass>()
+//        .registerPass<FunctionDeclarationPass>()
+//        .registerPass<ScopePass>()
+//        .registerPass<MemorySpacePass>()
+//        .registerPass<SynchronizationPass>()
+        .registerPass<FunctionPtrResolver>()
         .sourceLocations(file)
         .useParallelPasses(false)
         .useParallelFrontends(false)
@@ -54,7 +58,7 @@ fun main() {
         .get()
 
     val t = System.currentTimeMillis()
-//    result.persistGraph()
+    result.persistGraph()
     println(System.currentTimeMillis() - t)
 }
 
