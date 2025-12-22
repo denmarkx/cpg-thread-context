@@ -56,7 +56,6 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             // ..which is passed as the 2nd argument to this call:
             val threadNewCall = spawnCall.resolveUntilHit("std::sys::pal::windows::thread::Thread::new")?.last()
 
-
             // Any data explicitly moved into the thread closure is taken from std::thread::spawn -> the entire flow.
             // This is hard to track in a graph, so I sort of intercept the last argument here.
             val moved = spawnCall.arguments.last()
@@ -73,30 +72,19 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
             }
 
-
-            // XXX: ok so this is a new one..
-            // the pointer to the func within the vtable is placed inside a dbg.spill register
-            // this dbg.spill name for this is actually full of shit because its not actually any sort of spill.
-            // regardless, this wont be needed in the future
+            // TODO: there exists a function pointer call that is obscured due to it being within the std.
             val vtable = threadNewCall?.arguments?.get(2) as Reference
             val initializer = (vtable.refersTo as VariableDeclaration).initializer as ConstructExpression
             val shimFunc = (initializer.arguments[2] as Reference).refersTo as FunctionDeclaration
-            val rustTry = shimFunc.resolveUntilHit("__rust_try")?.last()
 
-            // TODO: function pointers are ambiguous so once again i am getting eaten alive
-            val tryCall = (rustTry?.arguments?.first() as Reference).refersTo as FunctionDeclaration
-            val threadClosurePath = tryCall?.resolveUntilHit("smuggle_race::main::{{closure}}")
-
+            val threadClosurePath = shimFunc.resolveUntilHit("smuggle_race::main::{{closure}}")
             if (threadClosurePath?.isEmpty() == true) return@forEachIndexed
             val threadClosure = threadClosurePath!!.last()
-
 
             val parameter = threadClosure.invokes.first().parameters.first()
             connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
             connectNodes(main, spawnCall, "THREAD_SPAWN")
             connectNodes(spawnCall, threadClosure, "THREAD_ENTRY")
-            return
-
         }
     }
 
