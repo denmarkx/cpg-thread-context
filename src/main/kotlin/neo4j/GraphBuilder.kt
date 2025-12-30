@@ -1,6 +1,9 @@
 package neo4j
 
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.persistence.labels
 import de.fraunhofer.aisec.cpg.persistence.properties
 import org.neo4j.driver.AuthTokens
@@ -14,6 +17,8 @@ import graph.getID
 import graph.getLabels
 import graph.getProperties
 import graph.isScheduledDeletion
+import graph.scheduleDeletion
+import language.getTrueName
 import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null
@@ -39,6 +44,21 @@ fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
 private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
     // String (Joined Labels) -> PropertyMap
     val nodeMapInfo: MutableMap<String, MutableList<Map<String, Any?>>> = HashMap()
+
+    // the inference pass will create another llvm.dbg.declare funcdecl which we don't need.
+    // this also has a LOT of edges on its params
+    nodes.filter { it.getTrueName() == "llvm.dbg.declare"}
+        .forEach {
+            scheduleDeletion(it)
+            if (it is FunctionDeclaration) {
+                it.parameters.forEach { p ->
+                    scheduleDeletion(p)
+
+                    // this param is the autoPtr0 thing has a prev dfg to a reference that will be empty
+                    p.prevDFG.forEach { n -> scheduleDeletion(n) }
+                }
+            }
+        }
 
     nodes.filter {
         // Filter nodes out (FilterInfo.FILTERED_NODES)

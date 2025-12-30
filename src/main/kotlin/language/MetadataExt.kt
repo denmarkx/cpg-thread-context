@@ -5,8 +5,10 @@ import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.get
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
@@ -109,7 +111,12 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
 }
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
-    if (this.getTrueName() == "llvm.dbg.declare") scheduleDeletion(this)
+    if (this.getTrueName() == "llvm.dbg.declare") {
+        scheduleDeletion(this)
+        if (this is FunctionDeclaration) {
+            this.parameters.forEach { scheduleDeletion(it) }
+        }
+    }
     if (LLVMHasMetadata(instr) == 0) return
 
     // LLVMInstructionGetDebugLoc on a FuncDecl will return null even though they may have a dbg loc..
