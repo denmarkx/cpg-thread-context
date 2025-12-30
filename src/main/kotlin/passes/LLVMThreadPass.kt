@@ -14,6 +14,8 @@ import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.edges.Edge
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
 import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
+import de.fraunhofer.aisec.cpg.graph.followPrevEOG
+import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.ConstructExpression
@@ -26,6 +28,7 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import graph.findNodeByName
 import graph.*
+import language.getTrueName
 
 // NOTE: This is extremely Rust-specific, but that is deliberate to start with.
 // Properly, (in stable Rust), we get the LLVM-IR of the standard library,
@@ -78,6 +81,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
         // The main thread was previously tagged with MainFunctionDeclaration (see MetadataExt)
         val main = getNodesWithLabel("MainFunctionDeclaration").first()
+        val thread_closure_name = main.getTrueName() + "::{{closure}}"
 
         // TODO: for when the native thread func calls are actually present within the IR,
         //      this would actually backtrack from that call to wherever.
@@ -90,7 +94,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         spawnCalls.forEachIndexed { i, spawnCall ->
             // The only reason I stop here is that this does a virtual dispatch of a function kept in a vtable.
             // ..which is passed as the 2nd argument to this call:
-            val threadNewCall = spawnCall.resolveUntilHit("std::sys::pal::windows::thread::Thread::new")?.last()
+            val threadNewCall = spawnCall.resolveUntilHit("std::sys::pal::windows::thread::Thread::new", false)?.last()
 
             // Any data explicitly moved into the thread closure is taken from std::thread::spawn -> the entire flow.
             // This is hard to track in a graph, so I sort of intercept the last argument here.
@@ -109,11 +113,22 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             }
 
             // TODO: there exists a function pointer call that is obscured due to it being within the std.
-            val vtable = threadNewCall?.arguments?.get(2) as Reference
-            val initializer = (vtable.refersTo as VariableDeclaration).initializer as ConstructExpression
+
+            // hack, but this all soon wotn be needed
+            val fvt = threadNewCall?.followPrevEOG {
+                it.start.code?.contains("vtable") == true
+            }
+            if (fvt == null || fvt.isEmpty()) return@forEachIndexed
+            val n = fvt.last().start
+            val mr = Regex("(vtable.\\d*)").find(n.code!!)
+            if (mr?.groupValues?.isEmpty() == true) return@forEachIndexed
+            val vtableName = mr!!.groupValues.first()
+            val vtable = nodes.find { it.name.localName == vtableName && it is VariableDeclaration && it.isGlobal } as VariableDeclaration
+
+            val initializer = vtable.initializer as ConstructExpression
             val shimFunc = (initializer.arguments[2] as Reference).refersTo as FunctionDeclaration
 
-            val threadClosurePath = shimFunc.resolveUntilHit("smuggle_race::main::{{closure}}")
+            val threadClosurePath = shimFunc.resolveUntilHit(thread_closure_name, false)
             if (threadClosurePath?.isEmpty() == true) return@forEachIndexed
             val threadClosure = threadClosurePath!!.last()
 
@@ -148,15 +163,15 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     fun recursivelyTraverseDataflow(node: Node, prevNode: Node?, path: MutableSet<Node>): Node? {
         path.add(node)
 
-        print(node.name.localName)
-        println(" (${node.javaClass.typeName.split(".").last()})")
+//        print(node.name.localName)
+//        println(" (${node.javaClass.typeName.split(".").last()})")
 
         // STOP at a LITERAL.
         if (node is Literal<*>) return node
 
         // From a UnaryOperator, we will have two DFGs. We follow the one that is not prevNode.
         if (node is UnaryOperator) {
-            println("  prevNode = ${prevNode!!.name.localName} (${getType(prevNode)}")
+//            println("  prevNode = ${prevNode!!.name.localName} (${getType(prevNode)}")
             val readRef = node.prevDFGEdges.find { it.start != prevNode }
             return recursivelyTraverseDataflow(readRef!!.start, node, path)
         }

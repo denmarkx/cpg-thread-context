@@ -42,7 +42,7 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
 
     nodes.filter {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
-        it::class.labels.any { l -> !FilteredInfo.FILTERED_NODES.contains(l) } &&
+        it::class.labels.all { l -> !FilteredInfo.FILTERED_NODES.contains(l) } &&
 
         // Filter nodes out that were scheduled for deletion:
         !isScheduledDeletion(it)

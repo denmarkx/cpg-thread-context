@@ -21,6 +21,7 @@ public class FilteredInfo {
         "LANGUAGE",
         "SCOPE", // this is useful (maybe) but i cant stand it popping up in neo4j right now
         "TYPE",
-        "TYPE_OBSERVERS"
+        "TYPE_OBSERVERS",
+        "SECONDARY_TYPES"
     );
 }
