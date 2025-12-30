@@ -38,6 +38,15 @@ fun connectNodes(start: Node, end: Node, type: String) {
     edgeData[type]!!.add(Relationship(start, end))
 }
 
+fun findEdgeEnd(start: Node, type: String) : Set<Node> {
+    if (type !in edgeData) return setOf()
+    val set = mutableSetOf<Node>()
+    edgeData[type]!!.filter { it.start == start }.forEach {
+        set.add(it.end)
+    }
+    return set
+}
+
 fun hasRelationshipWith(start: Node, end: Node): Boolean {
     return edgeData.values.find {
         it.find {

@@ -3,12 +3,17 @@ package passes
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.NodePath
 import de.fraunhofer.aisec.cpg.graph.blocks
+import de.fraunhofer.aisec.cpg.graph.builder.reference
 import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.edges.Edge
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
+import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.ConstructExpression
@@ -32,9 +37,40 @@ import graph.*
 // the standard lib must be converted to ir explicitly
 // ...though thats a TODO
 
+class Path(val edges : MutableList<ArbitraryEdge>) {
+    fun buildQuery() {
+        // ok so this is a cheat
+        edges.forEach { connectNodes(it.start, it.end, "IMPROPER_USAGE_PATH") }
+    }
+
+    override fun toString(): String {
+        var s = "PATH:\n"
+        edges.forEach { s += "  $it\n" }
+        return s
+    }
+}
+
+data class ArbitraryEdge(val start: Node, val end: Node, val type: String, val direction: String) {
+    override fun toString() : String {
+        var dir = "<---[$type]---"
+        if (direction == ">") {
+            dir = "---[$type]--->"
+        }
+        return "$start $dir $end"
+    }
+}
+
 @ExecuteLast
 class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     lateinit var nodes : List<Node>
+
+    /**
+     * It is much easier to attempt to build a Cypher query for suspicious paths on our own rather than rely
+     * on the user to do it..or have them rely on spotty related nodes.
+    */
+    val issues = mutableListOf<Path>()
+    val cypherQueries = mutableListOf<String>()
+
     override fun cleanup() {}
 
     override fun accept(t: TranslationUnitDeclaration) {
@@ -83,9 +119,14 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
             val parameter = threadClosure.invokes.first().parameters.first()
             connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
+            moved.nextDFG.add(parameter)
+            moved.nextDFGEdges.add(Dataflow(moved, parameter))
+
             connectNodes(main, spawnCall, "THREAD_SPAWN")
             connectNodes(spawnCall, threadClosure, "THREAD_ENTRY")
         }
+
+        identifyIssues()
     }
 
     fun getType(node: Node): String {
@@ -159,5 +200,64 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
         // If we can't satisfy any of the above, continue to traverse backwards.
         return recursivelyTraverseDataflow(edges.first().start, node, path)
+    }
+
+    fun identifyIssues() {
+        nodes.filter { it is VariableDeclaration}.forEach {
+            val nodepath = mutableListOf<ArbitraryEdge>()
+
+            val usage = getProperty(it, "THREAD_USE") ?: return@forEach
+            if (usage != "SHARED") return@forEach
+
+            var parameter : Node? = null
+
+            it.nextDFG.filter { reference ->
+                reference is Reference &&
+                reference.access == AccessValues.READ && getProperty(reference, "THREAD_USE") != "SHARED"
+            }.forEach { ref ->
+
+                // both of these references are expected to map to the same parameterdecl..which is also the thread arg
+                // this is equivalent to ref---[THREAD_MOVE_VARIABLE]---
+                val endNodes = findEdgeEnd(ref, "THREAD_MOVE_VARIABLE")
+                if (endNodes.isEmpty()) return@forEach
+
+                val param = endNodes.first()
+                if (param !is ParameterDeclaration) return@forEach
+                if (parameter == null) {
+                    parameter = param
+                } else if (parameter != param) {
+                    parameter = null
+                }
+
+                nodepath.add(ArbitraryEdge(it, ref, "REFERS_TO", "<"))
+                nodepath.add(ArbitraryEdge(ref, endNodes.first(), "THREAD_MOVE_VARIABLE", ">"))
+            }
+
+            if (parameter == null) return@forEach
+
+            // this parameter is always stored inside another pointer, so we have to walk the dfg until then.
+            val path = parameter.followDFGEdgesUntilHit { node ->
+                node is UnaryOperator && node.access == AccessValues.WRITE
+            }.fulfilled
+
+            if (path.isEmpty()) return@forEach
+            var previous = parameter
+            path.first().nodes.forEach { n ->
+                nodepath.add(ArbitraryEdge(previous!!, n, "DFG", ">"))
+                previous = n
+            }
+
+            // this is expected to be a single path to 1 ptr
+            val op = path.first().nodes.last() as UnaryOperator
+            val ptr = op.input
+            nodepath.add(ArbitraryEdge(op, ptr, "INPUT", ">"))
+
+            // from here, we can definitely say that we have multiple nodes modifying the same memory space
+            // ..but we want more info on perhaps what is being written
+            // we are able to follow the DFG from here..sometimes..still looking into this part.
+            val p = Path(nodepath)
+            issues.add(p)
+            p.buildQuery()
+        }
     }
 }
