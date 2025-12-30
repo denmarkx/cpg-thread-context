@@ -1,23 +1,16 @@
-package passes
+package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
-import de.fraunhofer.aisec.cpg.graph.NodePath
 import de.fraunhofer.aisec.cpg.graph.blocks
-import de.fraunhofer.aisec.cpg.graph.builder.reference
-import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.edges.Edge
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
 import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevEOG
-import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.refs
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.ConstructExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Literal
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
@@ -26,9 +19,14 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
-import graph.findNodeByName
-import graph.*
-import language.getTrueName
+import lving.backend.cpg.language.getTrueName
+import lving.backend.cpg.graph.connectNodes
+import lving.backend.cpg.graph.findCallWithinBlocks
+import lving.backend.cpg.graph.findEdgeEnd
+import lving.backend.cpg.graph.getNodesWithLabel
+import lving.backend.cpg.graph.getProperty
+import lving.backend.cpg.graph.resolveUntilHit
+import lving.backend.cpg.graph.setProperty
 
 // NOTE: This is extremely Rust-specific, but that is deliberate to start with.
 // Properly, (in stable Rust), we get the LLVM-IR of the standard library,
@@ -79,7 +77,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     override fun accept(t: TranslationUnitDeclaration) {
         nodes = SubgraphWalker.flattenAST(t)
 
-        // The main thread was previously tagged with MainFunctionDeclaration (see MetadataExt)
+        // The lving.backend.cpg.main thread was previously tagged with MainFunctionDeclaration (see MetadataExt)
         val main = getNodesWithLabel("MainFunctionDeclaration").first()
         val thread_closure_name = main.getTrueName() + "::{{closure}}"
 

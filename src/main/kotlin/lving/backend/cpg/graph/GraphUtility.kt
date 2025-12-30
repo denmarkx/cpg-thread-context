@@ -1,4 +1,4 @@
-package graph
+package lving.backend.cpg.graph
 import de.fraunhofer.aisec.cpg.graph.Node
 
 data class Relationship(val start: Node, val end: Node)

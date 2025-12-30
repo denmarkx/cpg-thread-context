@@ -1,4 +1,4 @@
-package passes
+package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.Node
@@ -8,7 +8,7 @@ import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
-import graph.setProperty
+import lving.backend.cpg.graph.setProperty
 
 /*
  * The "code" property on most of the FunctionDeclaration nodes are incorrect.

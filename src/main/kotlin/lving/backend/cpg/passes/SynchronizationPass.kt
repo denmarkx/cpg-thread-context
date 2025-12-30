@@ -1,19 +1,17 @@
-package passes
+package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
-import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followNextEOG
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
-import de.fraunhofer.aisec.cpg.passes.configuration.DependsOn
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
-import graph.addLabel
-import graph.connectNodes
-import graph.findNodeByName
-import graph.getLHSFromCall
-import utils.Demangle
+import lving.backend.cpg.graph.addLabel
+import lving.backend.cpg.graph.connectNodes
+import lving.backend.cpg.graph.findNodeByName
+import lving.backend.cpg.graph.getLHSFromCall
+import lving.backend.cpg.utils.Demangle
 
 // Rust-specific (for now; see note in LLVMThreadPass).
 // In the future, we would be looking for: (mutex-related)

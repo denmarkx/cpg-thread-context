@@ -1,14 +1,11 @@
-package language
+package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.get
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
@@ -17,14 +14,14 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.SubscriptExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
-import graph.MetadataType
-import graph.addLabel
-import graph.scheduleDeletion
-import graph.setMetadata
-import graph.setProperty
+import lving.backend.cpg.graph.MetadataType
+import lving.backend.cpg.graph.addLabel
+import lving.backend.cpg.graph.scheduleDeletion
+import lving.backend.cpg.graph.setMetadata
+import lving.backend.cpg.graph.setProperty
+import lving.backend.cpg.utils.Demangle
 import org.bytedeco.javacpp.SizeTPointer
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
-import utils.Demangle
 
 var deferredDebugSpill = mutableMapOf<ValueDeclaration, List<String>>()
 
@@ -127,7 +124,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         if (entry.isNull) return
 
         // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.
-        // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the main entry.
+        // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the lving.backend.cpg.main entry.
         val dispStr = LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, entry)).string
         if (dispStr.contains("DISPFlagMainSubprogram")) {
             addLabel(this, "MainFunctionDeclaration")
@@ -252,7 +249,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         filename = split[split.size - 1]
     }
 
-    // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is main
+    // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is lving.backend.cpg.main
     // ...so anything that is not prefixed by /rustc/ is assumed to be "user-code"
     setLocationInfo(filename, line)
 }

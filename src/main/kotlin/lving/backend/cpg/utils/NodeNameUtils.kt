@@ -1,4 +1,4 @@
-package utils
+package lving.backend.cpg.utils
 
 private val STANDARD_LIBRARY_HEADERS = listOf(
     "core::",

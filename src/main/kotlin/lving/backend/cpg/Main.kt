@@ -1,20 +1,17 @@
+package lving.backend.cpg
+
 import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
-import de.fraunhofer.aisec.cpg.passes.DFGPass
-import de.fraunhofer.aisec.cpg.passes.DynamicInvokeResolver
-import de.fraunhofer.aisec.cpg.passes.SymbolResolver
-import language.LLVMIRLanguage
-import language.LLVMIRLanguageFrontend
-import language.handleDeferredDebugSpillNodes
-import passes.LLVMThreadPass
-import neo4j.persistGraph
-import passes.FunctionDeclarationPass
-import passes.FunctionPtrResolver
-import passes.MemorySpacePass
-import passes.ScopePass
-import passes.SynchronizationPass
-import utils.Demangle
+import lving.backend.cpg.language.LLVMIRLanguage
+import lving.backend.cpg.language.handleDeferredDebugSpillNodes
+import lving.backend.cpg.passes.LLVMThreadPass
+import lving.backend.cpg.neo4j.persistGraph
+import lving.backend.cpg.passes.FunctionDeclarationPass
+import lving.backend.cpg.passes.FunctionPtrResolver
+import lving.backend.cpg.passes.ScopePass
+import lving.backend.cpg.passes.SynchronizationPass
+import lving.backend.cpg.utils.Demangle
 import java.io.File
 import kotlin.uuid.ExperimentalUuidApi
 

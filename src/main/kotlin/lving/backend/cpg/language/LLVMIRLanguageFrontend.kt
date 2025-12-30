@@ -23,7 +23,7 @@
  *                    \______/ \__|       \______/
  *
  */
-package language
+package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.frontends.Language

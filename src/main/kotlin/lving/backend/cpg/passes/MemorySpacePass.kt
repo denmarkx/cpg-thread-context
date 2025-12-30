@@ -1,22 +1,19 @@
-package passes
+package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
-import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLate
 //import graph.findCallByName
-import utils.Demangle
-import graph.MetadataType
-import graph.connectNodes
-import graph.getMetadata
+import lving.backend.cpg.utils.Demangle
+import lving.backend.cpg.graph.MetadataType
+import lving.backend.cpg.graph.connectNodes
+import lving.backend.cpg.graph.getMetadata
 
 @ExecuteBefore(LLVMThreadPass::class)
 class MemorySpacePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {

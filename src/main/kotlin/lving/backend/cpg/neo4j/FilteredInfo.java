@@ -1,4 +1,4 @@
-package neo4j;
+package lving.backend.cpg.neo4j;
 
 import java.util.List;
 

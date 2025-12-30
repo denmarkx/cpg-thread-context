@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package neo4j
+package lving.backend.cpg.neo4j
 
 /*
 * From https://github.com/Fraunhofer-AISEC/cpg/blob/main/cpg-neo4j/src/main/kotlin/de/fraunhofer/aisec/cpg/persistence/Neo4J.kt
@@ -29,8 +29,9 @@ import de.fraunhofer.aisec.cpg.persistence.properties
 import de.fraunhofer.aisec.cpg.persistence.schemaRelationships
 import org.neo4j.driver.Session
 import org.slf4j.LoggerFactory
-import graph.getEdges
-import graph.getID
+import lving.backend.cpg.graph.getEdges
+import lving.backend.cpg.graph.getID
+import kotlin.collections.iterator
 import kotlin.uuid.ExperimentalUuidApi
 
 /**
@@ -142,7 +143,7 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
                     value.map { edge ->
                         mapOf(
                             "startId" to getID(edge.start),
-                            "endId" to  getID(edge.end),
+                            "endId" to getID(edge.end),
                             "type" to entry.key,
                         ) + edge.properties()
                     }

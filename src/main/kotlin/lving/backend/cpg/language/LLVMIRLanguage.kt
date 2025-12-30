@@ -23,7 +23,7 @@
  *                    \______/ \__|       \______/
  *
  */
-package language
+package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.frontends.Language
 import de.fraunhofer.aisec.cpg.graph.types.FloatingPointType

@@ -1,9 +1,7 @@
-package neo4j
+package lving.backend.cpg.neo4j
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.persistence.labels
 import de.fraunhofer.aisec.cpg.persistence.properties
 import org.neo4j.driver.AuthTokens
@@ -12,20 +10,21 @@ import org.neo4j.driver.GraphDatabase
 import org.neo4j.driver.SessionConfig
 import org.neo4j.driver.async.AsyncSession
 import org.neo4j.driver.async.ResultCursor
-import utils.Demangle
-import graph.getID
-import graph.getLabels
-import graph.getProperties
-import graph.isScheduledDeletion
-import graph.scheduleDeletion
-import language.getTrueName
+import lving.backend.cpg.utils.Demangle
+import lving.backend.cpg.graph.getID
+import lving.backend.cpg.graph.getLabels
+import lving.backend.cpg.graph.getProperties
+import lving.backend.cpg.graph.isScheduledDeletion
+import lving.backend.cpg.graph.scheduleDeletion
+import lving.backend.cpg.language.getTrueName
+import lving.backend.cpg.neo4j.FilteredInfo
 import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null
 
 fun getDriver() {
     if (driver != null) return
-    driver = GraphDatabase.driver("bolt://localhost:7687", AuthTokens.basic("neo4j", "00000000"));
+    driver = GraphDatabase.driver("bolt://localhost:7687", AuthTokens.basic("lving/backend/cpg/neo4j/backend/cpg/neo4j", "00000000"));
     driver?.verifyConnectivity()
 }
 
@@ -33,7 +32,7 @@ fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
     getDriver()
     driver!!.executableQuery("CALL apoc.periodic.iterate(\"MATCH (n) RETURN n\", \"DETACH DELETE n\", {batchSize:1000})").execute()
 
-    val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("neo4j").build())
+    val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("lving/backend/cpg/neo4j/backend/cpg/neo4j").build())
     persistNodes(session, nodes)
 
     // Prior to persisting edges, nodes are given an index:

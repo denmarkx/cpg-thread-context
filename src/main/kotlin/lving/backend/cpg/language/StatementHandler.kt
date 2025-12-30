@@ -23,31 +23,29 @@
  *                    \______/ \__|       \______/
  *
  */
-package language
+package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.frontends.Handler
 import de.fraunhofer.aisec.cpg.frontends.TranslationException
 import de.fraunhofer.aisec.cpg.graph.*
-import de.fraunhofer.aisec.cpg.graph.Node.Companion
-import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
-import de.fraunhofer.aisec.cpg.graph.edges.flows.Invoke
+import de.fraunhofer.aisec.cpg.graph.get
+import de.fraunhofer.aisec.cpg.graph.invoke
 import de.fraunhofer.aisec.cpg.graph.statements.*
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.*
-import de.fraunhofer.aisec.cpg.graph.types.FunctionPointerType
 import de.fraunhofer.aisec.cpg.graph.types.ObjectType
 import de.fraunhofer.aisec.cpg.graph.types.PointerType
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.helpers.annotations.FunctionReplacement
+import lving.backend.cpg.passes.deferredFunctionPointers
+import lving.backend.cpg.utils.Demangle
 import java.util.function.BiConsumer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
-import passes.deferredFunctionPointers
-import utils.Demangle
-import java.nio.IntBuffer
+import kotlin.collections.iterator
 
 class StatementHandler(lang: LLVMIRLanguageFrontend) :
     Handler<Statement, Pointer, LLVMIRLanguageFrontend>(::ProblemExpression, lang) {
@@ -1692,7 +1690,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         goto.labelName = labelName
         val label = newLabelStatement()
         label.name = Name(labelName)
-        // If the bound AST node is/or was transformed into a CPG node the cpg node is bound
+        // If the bound AST node is/or was transformed into a CPG node the lving.backend.cpg node is bound
         // to the CPG goto statement
         frontend.registerObjectListener(label, assigneeTargetLabel)
         if (goto.targetLabel == null) {

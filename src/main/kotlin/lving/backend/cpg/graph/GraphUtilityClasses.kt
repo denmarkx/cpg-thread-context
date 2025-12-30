@@ -1,5 +1,4 @@
-package graph
-import de.fraunhofer.aisec.cpg.graph.Node
+package lving.backend.cpg.graph
 import java.util.UUID
 
 enum class MetadataType {

@@ -1,12 +1,12 @@
-package passes
+package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.scopes.FunctionScope
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
-import utils.Demangle
-import graph.setProperty
+import lving.backend.cpg.utils.Demangle
+import lving.backend.cpg.graph.setProperty
 
 @ExecuteBefore(LLVMThreadPass::class)
 class ScopePass(ctx: TranslationContext) : TranslationUnitPass(ctx) {

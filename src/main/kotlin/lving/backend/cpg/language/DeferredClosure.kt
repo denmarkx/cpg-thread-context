@@ -1,9 +1,10 @@
 @file:OptIn(ExperimentalUuidApi::class)
-package language
+
+package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
-import graph.connectNodes
+import lving.backend.cpg.graph.connectNodes
 import kotlin.uuid.ExperimentalUuidApi
 
 var deferClosureMap: MutableMap<Reference, DeferredClosure> = mutableMapOf()

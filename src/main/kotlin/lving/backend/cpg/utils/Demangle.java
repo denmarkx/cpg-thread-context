@@ -1,4 +1,4 @@
-package utils;
+package lving.backend.cpg.utils;
 
 // https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
 // Rust uses C++-style mangling, but it's not exact:
