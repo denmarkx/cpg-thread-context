@@ -24,7 +24,7 @@ private var driver: Driver? = null
 
 fun getDriver() {
     if (driver != null) return
-    driver = GraphDatabase.driver("bolt://localhost:7687", AuthTokens.basic("lving/backend/cpg/neo4j/backend/cpg/neo4j", "00000000"));
+    driver = GraphDatabase.driver("bolt://localhost:7687", AuthTokens.basic("neo4j", "00000000"));
     driver?.verifyConnectivity()
 }
 
@@ -32,7 +32,7 @@ fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
     getDriver()
     driver!!.executableQuery("CALL apoc.periodic.iterate(\"MATCH (n) RETURN n\", \"DETACH DELETE n\", {batchSize:1000})").execute()
 
-    val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("lving/backend/cpg/neo4j/backend/cpg/neo4j").build())
+    val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("neo4j").build())
     persistNodes(session, nodes)
 
     // Prior to persisting edges, nodes are given an index:
