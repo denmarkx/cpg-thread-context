@@ -119,7 +119,7 @@ val Persistable.connectedNodes: IdentitySet<Node>
     }
 
 @OptIn(ExperimentalUuidApi::class)
-private fun List<Node>.collectRelationships(): List<Relationship> {
+fun List<Node>.collectRelationships(): List<Relationship> {
     val relationships = mutableListOf<Relationship>()
 
     // EdgeData:
@@ -132,8 +132,6 @@ private fun List<Node>.collectRelationships(): List<Relationship> {
             )
         }
     }
-
-    println(relationships)
 
     for (node in this) {
         for (entry in node::class.schemaRelationships) {

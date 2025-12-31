@@ -104,6 +104,11 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         val record = Regex("#dbg_declare\\(([^,]+), (!\\d+), (!\\w+\\((?:[^\\)]+)?\\)), (!\\d+)\\)")
         lines
             .forEachIndexed { i, l ->
+                if (l.contains("#dbg_value")) {
+                    // TODO: not handled yet
+                    lines[i] = ""
+                    return@forEachIndexed
+                }
                 if (!l.contains("#dbg_declare")) return@forEachIndexed
                 val match = record.find(l) ?: return@forEachIndexed
                 val groups = match.groupValues

@@ -8,8 +8,6 @@ import org.neo4j.driver.AuthTokens
 import org.neo4j.driver.Driver
 import org.neo4j.driver.GraphDatabase
 import org.neo4j.driver.SessionConfig
-import org.neo4j.driver.async.AsyncSession
-import org.neo4j.driver.async.ResultCursor
 import lving.backend.cpg.utils.Demangle
 import lving.backend.cpg.graph.getID
 import lving.backend.cpg.graph.getLabels
@@ -17,8 +15,9 @@ import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.isScheduledDeletion
 import lving.backend.cpg.graph.scheduleDeletion
 import lving.backend.cpg.language.getTrueName
-import lving.backend.cpg.neo4j.FilteredInfo
-import java.util.concurrent.CompletableFuture
+import org.neo4j.driver.Session
+import lving.backend.cpg.neo4j.FILTERED_EDGES
+import lving.backend.cpg.neo4j.FILTERED_NODES
 
 private var driver: Driver? = null
 
@@ -30,14 +29,15 @@ private fun getDriver() {
 
 fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
     getDriver()
-    driver!!.executableQuery("CALL apoc.periodic.iterate(\"MATCH (n) RETURN n\", \"DETACH DELETE n\", {batchSize:1000})").execute()
+    driver!!.executableQuery("CALL apoc.periodic.iterate(\"MATCH (n) RETURN n\", \"DETACH DELETE n\", {batchSize:10000})").execute()
 
-    val session = driver!!.session(AsyncSession::class.java, SessionConfig.builder().withDatabase("neo4j").build())
-    persistNodes(session, nodes)
+    val session = driver!!.session(SessionConfig.builder().withDatabase("neo4j").build())
+    with(session) { nodes.persist() }
 
     // Prior to persisting edges, nodes are given an index:
     driver!!.executableQuery("CREATE INDEX IF NOT EXISTS FOR (n:Node) ON (n.id)").execute()
-    persistEdges(session, edges)
+
+    session.createRelationships(edges)
 }
 
 /**
@@ -62,7 +62,7 @@ fun List<Node>.filterAll() : List<Node> {
 
     return this.filter {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
-        it::class.labels.all { l -> !FilteredInfo.FILTERED_NODES.contains(l) } &&
+        it::class.labels.all { l -> !FILTERED_NODES.contains(l) } &&
 
         // Filter nodes out that were scheduled for deletion:
         !isScheduledDeletion(it)
@@ -74,8 +74,14 @@ fun List<Node>.filterAll() : List<Node> {
  * This returns a map of all properties that is prepared to be placed within a Cypher.
 */
 fun Node.prepareProperties() : Map<String, Any?> {
-    // See utils/NodeIDMap for why we have to override the CPG ID.
     val props = this.properties().toMutableMap()
+    props["labels"] = this::class.labels + getLabels(this)
+
+    if ("MainFunctionDeclaration" in getLabels(this)) {
+        println("prepareprops mfd exists for ${this.hashCode()}")
+    }
+
+    // See utils/NodeIDMap for why we have to override the CPG ID.
     props["id"] = getID(this)
 
     // Demangle names:
@@ -90,81 +96,51 @@ fun Node.prepareProperties() : Map<String, Any?> {
  * Filters those in FILTERED_EDGES.
 */
 fun List<Relationship>.filterEdges() : List<Relationship> {
-    return this.filter { it["type"] !in FilteredInfo.FILTERED_EDGES }
+    return this.filter { it["type"] !in FILTERED_EDGES }
 }
 
-private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
-    // String (Joined Labels) -> PropertyMap
-    val nodeMapInfo: MutableMap<String, MutableList<Map<String, Any?>>> = HashMap()
-
-    nodes.filterAll()
-        .forEach {
-            val allLabels = it::class.labels + getLabels(it);
-            val k = allLabels.joinToString(":")
-            nodeMapInfo.putIfAbsent(k, mutableListOf())
-
-            val props = it.prepareProperties()
-            nodeMapInfo[k]?.add(props)
-        }
-
-    // Calling runAsync and storing the futures before moving to edges:
-    val nodeFutures: MutableList<CompletableFuture<ResultCursor>> = ArrayList()
-
-    nodeMapInfo.forEach {
-        nodeFutures.add(
-            session.runAsync("UNWIND  ${"$"}props AS m CREATE (n:${it.key}) SET n=m", mapOf("props" to it.value))
-                .toCompletableFuture()
-        )
-    }
-
-    // Block until all node commits are finished:
-    nodeFutures.forEach { it.join() }
-}
-
-private fun persistEdges(session: AsyncSession, edges: List<Relationship>) {
-    // Edge Type -> Relationship Map
-    val edgeMapInfo: MutableMap<String, MutableList<Relationship>> = HashMap()
-    val edgeFutures: MutableList<CompletableFuture<*>> = ArrayList()
-
-    // Relationship actually has the properties expanded within the map.
-    val parsedEdges: MutableList<Relationship> = mutableListOf()
-
-    edges.filterEdges().forEach {
-        parsedEdges.add(
-            mapOf(
-                "startId" to it["startId"],
-                "endId" to it["endId"],
-                "type" to it["type"],
-                "props" to it.filterKeys { k -> !listOf("startId", "endId", "type").contains(k) }
-            )
-        )
-    }
-
-    // Where Relationship has start, end, type, props keys.
-    parsedEdges.forEach {
-        val k = it["type"] as String
-        edgeMapInfo.putIfAbsent(k, mutableListOf())
-        edgeMapInfo[k]?.add(it)
-    }
-
-    val edgeCreateCypher = $$"""
-        UNWIND $info AS row
-        MATCH (s:Node {id: row.startId})
-        MATCH (e:Node {id: row.endId})
-        MERGE (s)-[r:%s]->(e)
-        SET r=row.props
-    """.trimIndent()
-
-    edgeMapInfo
-        .forEach {
-            it.value.chunked(700).forEach { b ->
-                edgeFutures.add(
-                    session.runAsync(edgeCreateCypher.format(it.key), mapOf("info" to b))
-                        .toCompletableFuture()
-                )
+context(session: Session)
+private fun List<Node>.persist() {
+    this
+        .filterAll()
+        .chunked(10000).map { chunk ->
+            val params =
+                mapOf("props" to chunk.map {
+                    val props = it.prepareProperties().toMutableMap()
+                    mapOf("labels" to props["labels"]) + props
+                })
+            session.executeWrite { tx ->
+                tx.run(
+                        """
+                       UNWIND ${"$"}props AS map
+                       WITH map, apoc.map.removeKeys(map, ['labels']) AS properties
+                       CALL apoc.create.node(map.labels, properties) YIELD node
+                       RETURN node
+                       """,
+                        params,
+                    )
+                    .consume()
             }
         }
+}
 
-    // Block until all edge commits are finished:
-    CompletableFuture.allOf(*edgeFutures.toTypedArray()).join()
+private fun Session.createRelationships(props: List<Relationship>) {
+    val filteredProps = props.filterEdges()
+    val params = mapOf("props" to filteredProps)
+
+    executeWrite { tx ->
+        tx.run(
+                """
+            UNWIND ${'$'}props AS map
+            MATCH (s:Node {id: map.startId})
+            MATCH (e:Node {id: map.endId})
+            WITH s, e, map, apoc.map.removeKeys(map, ['startId', 'endId', 'type']) AS properties
+            CALL apoc.create.relationship(s, map.type, properties, e) YIELD rel
+            RETURN rel
+            """
+                    .trimIndent(),
+                params,
+            )
+            .consume()
+    }
 }
