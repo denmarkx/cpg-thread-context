@@ -22,7 +22,7 @@ import java.util.concurrent.CompletableFuture
 
 private var driver: Driver? = null
 
-fun getDriver() {
+private fun getDriver() {
     if (driver != null) return
     driver = GraphDatabase.driver("bolt://localhost:7687", AuthTokens.basic("neo4j", "00000000"));
     driver?.verifyConnectivity()
@@ -40,13 +40,14 @@ fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
     persistEdges(session, edges)
 }
 
-private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
-    // String (Joined Labels) -> PropertyMap
-    val nodeMapInfo: MutableMap<String, MutableList<Map<String, Any?>>> = HashMap()
-
+/**
+ * Filters a list of Nodes by removing llvm.dbg.declare, nodes whose
+ * label exists in FILTERED_NODES, and nodes scheduled for deletion internally.
+*/
+fun List<Node>.filterAll() : List<Node> {
     // the inference pass will create another llvm.dbg.declare funcdecl which we don't need.
     // this also has a LOT of edges on its params
-    nodes.filter { it.getTrueName() == "llvm.dbg.declare"}
+    this.filter { it.getTrueName() == "llvm.dbg.declare" }
         .forEach {
             scheduleDeletion(it)
             if (it is FunctionDeclaration) {
@@ -59,32 +60,52 @@ private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
             }
         }
 
-    nodes.filter {
+    return this.filter {
         // Filter nodes out (FilterInfo.FILTERED_NODES)
         it::class.labels.all { l -> !FilteredInfo.FILTERED_NODES.contains(l) } &&
 
         // Filter nodes out that were scheduled for deletion:
         !isScheduledDeletion(it)
     }
+}
 
+/**
+ * There are some properties that are forced on nodes that aren't apart of its member fields.
+ * This returns a map of all properties that is prepared to be placed within a Cypher.
+*/
+fun Node.prepareProperties() : Map<String, Any?> {
+    // See utils/NodeIDMap for why we have to override the CPG ID.
+    val props = this.properties().toMutableMap()
+    props["id"] = getID(this)
 
+    // Demangle names:
+    props["name"] = Demangle.demangle(props["name"] as String)
+
+    // Auxiliary Data
+    props += getProperties(this)
+    return props
+}
+
+/**
+ * Filters those in FILTERED_EDGES.
+*/
+fun List<Relationship>.filterEdges() : List<Relationship> {
+    return this.filter { it["type"] !in FilteredInfo.FILTERED_EDGES }
+}
+
+private fun persistNodes(session: AsyncSession, nodes: List<Node>) {
+    // String (Joined Labels) -> PropertyMap
+    val nodeMapInfo: MutableMap<String, MutableList<Map<String, Any?>>> = HashMap()
+
+    nodes.filterAll()
         .forEach {
             val allLabels = it::class.labels + getLabels(it);
             val k = allLabels.joinToString(":")
             nodeMapInfo.putIfAbsent(k, mutableListOf())
 
-            // See utils/NodeIDMap for why we have to override the CPG ID.
-            val props = it.properties().toMutableMap()
-            props["id"] = getID(it)
-
-            // Demangle names:
-            props["name"] = Demangle.demangle(props["name"] as String)
-
-            // Auxiliary Data
-            props += getProperties(it)
+            val props = it.prepareProperties()
             nodeMapInfo[k]?.add(props)
         }
-
 
     // Calling runAsync and storing the futures before moving to edges:
     val nodeFutures: MutableList<CompletableFuture<ResultCursor>> = ArrayList()
@@ -107,7 +128,8 @@ private fun persistEdges(session: AsyncSession, edges: List<Relationship>) {
 
     // Relationship actually has the properties expanded within the map.
     val parsedEdges: MutableList<Relationship> = mutableListOf()
-    edges.forEach {
+
+    edges.filterEdges().forEach {
         parsedEdges.add(
             mapOf(
                 "startId" to it["startId"],
@@ -134,7 +156,6 @@ private fun persistEdges(session: AsyncSession, edges: List<Relationship>) {
     """.trimIndent()
 
     edgeMapInfo
-        .filter { !FilteredInfo.FILTERED_EDGES.contains(it.key) }
         .forEach {
             it.value.chunked(700).forEach { b ->
                 edgeFutures.add(
