@@ -92,11 +92,7 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         spawnCalls.forEachIndexed { i, spawnCall ->
             // The only reason I stop here is that this does a virtual dispatch of a function kept in a vtable.
             // ..which is passed as the 2nd argument to this call:
-            var threadNewCall = spawnCall.resolveUntilHit("std::sys::pal::windows::thread::Thread::new", false)?.last()
-            if (threadNewCall == null) {
-                threadNewCall = spawnCall.resolveUntilHit("std::sys::thread::unix::Thread::new", false)?.last() ?: return
-
-            }
+            var threadNewCall = spawnCall.resolveUntilHit("std::sys::thread::unix::Thread::new", false)?.last()
 
             // Any data explicitly moved into the thread closure is taken from std::thread::spawn -> the entire flow.
             // This is hard to track in a graph, so I sort of intercept the last argument here.
