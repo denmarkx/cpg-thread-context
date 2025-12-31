@@ -32,7 +32,7 @@ class SynchronizationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             findNodeByName<CallExpression>(nodes, "std::sync::poison::mutex::Mutex<T>::lock").forEach { lock ->
                 addLabel(lock, "Acquire")
                 val pathToUnlock = lock.followNextEOG {
-                    Demangle.demangle(it.start).contains("core::ptr::drop_in_place<std::sync::poison::mutex")
+                    Demangle.demangle(it.start.name.localName).contains("core::ptr::drop_in_place<std::sync::poison::mutex")
                 }
                 pathToUnlock?.forEach {
                     connectNodes(vars.first(), it.start, "SYNC")
