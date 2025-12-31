@@ -1,10 +1,13 @@
 package lving.backend.cpg.graph
 import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.persistence.labels
+import java.util.Collections
+import java.util.IdentityHashMap
 
 data class Relationship(val start: Node, val end: Node)
 
-private val nodeData: MutableMap<Node?, NodeData> = mutableMapOf()
-private val edgeData: MutableMap<String, MutableSet<Relationship>> = mutableMapOf()
+private val nodeData = Collections.synchronizedMap<Node?, NodeData>(IdentityHashMap())
+private val edgeData = Collections.synchronizedMap<String, MutableSet<Relationship>>(IdentityHashMap())
 
 /*
 ==========================================
