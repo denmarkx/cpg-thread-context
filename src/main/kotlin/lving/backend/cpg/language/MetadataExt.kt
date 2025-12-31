@@ -22,8 +22,10 @@ import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.utils.Demangle
 import org.bytedeco.javacpp.SizeTPointer
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
+import java.util.Collections
+import java.util.IdentityHashMap
 
-var deferredDebugSpill = mutableMapOf<ValueDeclaration, List<String>>()
+var deferredDebugSpill = Collections.synchronizedMap<ValueDeclaration, List<String>>(IdentityHashMap())
 
 /*
 * When Node.applyMetadataExt is called, the <x>.dbg.spill reference
