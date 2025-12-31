@@ -198,6 +198,12 @@ class LLVMThreadPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 // On the subsequent call, where we are in this func as a UnaryOperator, we switch back the DFG.
                 return recursivelyTraverseDataflow(writeRef.nextDFG.toList().first { it != writeRef }, writeRef, path)
             }
+
+            // again, I have no idea why there is sometimes a DFG on a write reference and other times there aren't
+            // though this gripe is noted later in this function.
+            if (node is Reference && node.access == AccessValues.WRITE) {
+                return recursivelyTraverseDataflow(node.nextDFG.toList().first { it != node && it != node.refersTo }, node, path)
+            }
             return null
         }
 
