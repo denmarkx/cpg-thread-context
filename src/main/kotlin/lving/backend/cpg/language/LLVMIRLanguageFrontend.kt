@@ -101,7 +101,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
         // this is done (mostly) in accordance with
         // https://llvm.org/docs/RemoveDIsDebugInfo.html#textual-ir-changes
-        val record = Regex("#dbg_declare\\(([^,]+), (!\\d+), (!\\w+\\((?:[^\\)]+)?\\)), (!\\d+)\\)")
+        val record = """#dbg_declare\(([^,]+), (!\d+), (!\w+(?:[^\)]+)?\)), (!\d+)""".toRegex()
         lines
             .forEachIndexed { i, l ->
                 if (l.contains("#dbg_value")) {
@@ -113,12 +113,12 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
                 val match = record.find(l) ?: return@forEachIndexed
                 val groups = match.groupValues
 
-                lines[i] = "  call void @llvm.dbg.declare(metadata ${groups[1]}, metadata ${groups[2]}, " +
+                lines[i] = "  call void @${LLVM_DBG_DECLARE_NAME}(metadata ${groups[1]}, metadata ${groups[2]}, " +
                     "metadata ${groups[3]}), !dbg ${groups[4]}"
             }
 
         var text = lines.joinToString("\n")
-        text += "declare void @llvm.dbg.declare(metadata, metadata, metadata)"
+        text += "declare void @${LLVM_DBG_DECLARE_NAME}(metadata, metadata, metadata)"
 
         // Another thing that happens is that nuw for getelementptr and trunc aren't accepted.
         // this is a bit weird since it's valid in llvm 20

@@ -14,6 +14,7 @@ import lving.backend.cpg.graph.getLabels
 import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.isScheduledDeletion
 import lving.backend.cpg.graph.scheduleDeletion
+import lving.backend.cpg.language.LLVM_DBG_DECLARE_NAME
 import lving.backend.cpg.language.getTrueName
 import org.neo4j.driver.Session
 import lving.backend.cpg.neo4j.FILTERED_EDGES
@@ -47,7 +48,7 @@ fun persistGraph(nodes: List<Node>, edges: List<Relationship>) {
 fun List<Node>.filterAll() : List<Node> {
     // the inference pass will create another llvm.dbg.declare funcdecl which we don't need.
     // this also has a LOT of edges on its params
-    this.filter { it.getTrueName() == "llvm.dbg.declare" }
+    this.filter { it.getTrueName() == LLVM_DBG_DECLARE_NAME }
         .forEach {
             scheduleDeletion(it)
             if (it is FunctionDeclaration) {
@@ -76,10 +77,6 @@ fun List<Node>.filterAll() : List<Node> {
 fun Node.prepareProperties() : Map<String, Any?> {
     val props = this.properties().toMutableMap()
     props["labels"] = this::class.labels + getLabels(this)
-
-    if ("MainFunctionDeclaration" in getLabels(this)) {
-        println("prepareprops mfd exists for ${this.hashCode()}")
-    }
 
     // See utils/NodeIDMap for why we have to override the CPG ID.
     props["id"] = getID(this)

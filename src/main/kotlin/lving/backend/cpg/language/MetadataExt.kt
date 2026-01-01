@@ -25,6 +25,15 @@ import org.bytedeco.llvm.LLVM.LLVMMetadataRef
 import java.util.Collections
 import java.util.IdentityHashMap
 
+/**
+ * This exists solely because the Gradle build that uses this repository as a lib is discarding the
+ * llvm.dbg.declare intrinsic calls that we replace the debug records with.
+ * I can't seem to figure out why this is the case.
+ *
+ * We aren't able to use debug record calls since bytedeco bindings are currently broken for those.
+*/
+val LLVM_DBG_DECLARE_NAME = "llvm.dbg.declare2"
+
 var deferredDebugSpill = Collections.synchronizedMap<ValueDeclaration, List<String>>(IdentityHashMap())
 
 /*
@@ -110,7 +119,7 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
 }
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
-    if (this.getTrueName() == "llvm.dbg.declare") {
+    if (this.getTrueName() == LLVM_DBG_DECLARE_NAME) {
         scheduleDeletion(this)
         if (this is FunctionDeclaration) {
             this.parameters.forEach { scheduleDeletion(it) }
@@ -155,7 +164,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
 
     // The only exception to that are literals. Those will be directly stored within the dbg.spill
     // register and are sort of useless.
-    if (this.getTrueName() == "llvm.dbg.declare") {
+    if (this.getTrueName() == LLVM_DBG_DECLARE_NAME) {
         if (this is CallExpression) {
             // handle metadata ptr undef
             if (this.arguments[0] is ProblemExpression) {
@@ -199,7 +208,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             // A captured borrow is passed as a regular arg to the closure call.
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
-            if (this.name.localName == "llvm.dbg.declare") {
+            if (this.name.localName == LLVM_DBG_DECLARE_NAME) {
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
 
