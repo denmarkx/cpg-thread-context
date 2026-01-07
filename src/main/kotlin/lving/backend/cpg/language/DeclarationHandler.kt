@@ -49,7 +49,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
         map.put(LLVMTypeRef::class.java) { handleStructureType(it as LLVMTypeRef) }
     }
 
-    private fun handleValue(value: LLVMValueRef): Declaration {
+    private fun handleValue(value: LLVMValueRef): Declaration? {
         val declaration = when (val kind = LLVMGetValueKind((value))) {
             LLVMFunctionValueKind -> handleFunction(value)
             LLVMGlobalVariableValueKind -> handleGlobal(value)
@@ -62,7 +62,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
-        declaration.applyMetadataExt(value, frontend)
+        declaration?.applyMetadataExt(value, frontend)
         return declaration
     }
 
@@ -97,8 +97,12 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
      * [FunctionDeclaration.body] or complete definitions of functions including a body of at least
      * one basic block.
      */
-    private fun handleFunction(func: LLVMValueRef): FunctionDeclaration {
+    private fun handleFunction(func: LLVMValueRef): FunctionDeclaration? {
         val name = LLVMGetValueName(func)
+
+        // Intrinsics are handled elsewhere.
+        if (name.string.startsWith("llvm")) return null
+
         val functionDeclaration = newFunctionDeclaration(name.string, rawNode = func)
 
         // return types are a bit tricky, because the type of the function is a pointer to the

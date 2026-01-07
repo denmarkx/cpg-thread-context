@@ -55,6 +55,11 @@ import java.io.FileReader
  */
 var ctxRef: LLVMContextRef? = null
 
+val dbgRecordIntrinsic = mapOf(
+    "dbg_value" to "llvm.dbg.value",
+    "dbg_declare" to "llvm.dbg.declare",
+)
+
 @RegisterExtraPass(CompressLLVMPass::class)
 class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRLanguageFrontend>) :
     LanguageFrontend<Pointer, LLVMTypeRef>(ctx, language) {
@@ -62,6 +67,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val statementHandler = StatementHandler(this)
     val declarationHandler = DeclarationHandler(this)
     val expressionHandler = ExpressionHandler(this)
+    val intrinsicHandler = IntrinsicHandler(this)
     val typeCache = mutableMapOf<String, Type>()
 
     val phiList = mutableListOf<LLVMValueRef>()
@@ -101,24 +107,25 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
         // this is done (mostly) in accordance with
         // https://llvm.org/docs/RemoveDIsDebugInfo.html#textual-ir-changes
-        val record = """#dbg_declare\(([^,]+), (!\d+), (!\w+(?:[^\)]+)?\)), (!\d+)""".toRegex()
+        val dbgName = "dbg_declare|dbg_value"
+        val record = """\s*($dbgName)\(([^,]+), (!\d+), (!\w+(?:[^\)]+)?\)), (!\d+)""".toRegex()
+
+        // It is still considered invalid syntax to have the regular debug record replace the intrinsic call.
+        // So, we just rewrite the line before processing everything.
         lines
             .forEachIndexed { i, l ->
-                if (l.contains("#dbg_value")) {
-                    // TODO: not handled yet
-                    lines[i] = ""
-                    return@forEachIndexed
-                }
-                if (!l.contains("#dbg_declare")) return@forEachIndexed
                 val match = record.find(l) ?: return@forEachIndexed
+                if (match.groupValues.isEmpty()) return@forEachIndexed
                 val groups = match.groupValues
 
-                lines[i] = "  call void @${LLVM_DBG_DECLARE_NAME}(metadata ${groups[1]}, metadata ${groups[2]}, " +
-                    "metadata ${groups[3]}), !dbg ${groups[4]}"
+                val intrinsicCall = dbgRecordIntrinsic[groups[1]]
+                lines[i] = "  call void @$intrinsicCall(metadata ${groups[2]}, metadata ${groups[3]}, " +
+                    "metadata ${groups[4]}), !dbg ${groups[5]}"
             }
 
         var text = lines.joinToString("\n")
-        text += "declare void @${LLVM_DBG_DECLARE_NAME}(metadata, metadata, metadata)"
+        text += "declare void @llvm.dbg.declare(metadata, metadata, metadata)"
+        text += "declare void @llvm.dbg.value(metadata, metadata, metadata)"
 
         // Another thing that happens is that nuw for getelementptr and trunc aren't accepted.
         // this is a bit weird since it's valid in llvm 20
@@ -148,6 +155,13 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         }
         bench.addMeasurement()
         bench = Benchmark(this.javaClass, "Transform to CPG")
+
+        // TODO: The version of LLVM that we are using has an error
+        //  with LLVMGetFirstDbgRecord() that causes a segfault.
+        //  Fortunately, there is not a requirement to use dbg records right now.
+        //  ..and we will have to wait for the next maven release for bytedeco's llvm binds.
+        //  https://github.com/llvm/llvm-project/pull/151101/files
+        LLVMSetIsNewDbgInfoFormat(mod, 0)
 
         val tu = newTranslationUnitDeclaration(file.name)
         currentTU = tu

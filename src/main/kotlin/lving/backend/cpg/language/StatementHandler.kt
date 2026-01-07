@@ -67,7 +67,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
      * Currently, this wrapping is done in the individual instruction parsing functions, but should
      * be extracted from that, e.g. by routing it through the [DeclarationHandler].
      */
-    private fun handleInstruction(instr: LLVMValueRef): Statement {
+    private fun handleInstruction(instr: LLVMValueRef): Statement? {
         if (LLVMIsABinaryOperator(instr) != null) {
             val instruction = handleBinaryInstruction(instr)
             instruction.applyMetadataExt(instr, frontend)
@@ -235,7 +235,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 )
             }
         }
-        instruction.applyMetadataExt(instr, frontend)
+        instruction?.applyMetadataExt(instr, frontend)
         return instruction
     }
 
@@ -1136,9 +1136,15 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
      *
      * Returns either a [DeclarationStatement] or a [CallExpression].
      */
-    private fun handleFunctionCall(instr: LLVMValueRef): Statement {
+    private fun handleFunctionCall(instr: LLVMValueRef): Statement? {
         val calledFunc = LLVMGetCalledValue(instr)
         var calledFuncName: CharSequence = LLVMGetValueName(calledFunc).string
+
+        // Intrinsics are handled elsewhere:
+        if (calledFuncName.startsWith("llvm")) {
+            return frontend.intrinsicHandler.handle(instr)
+        }
+
         var max = LLVMGetNumOperands(instr) - 1
         var idx = 0
 
@@ -1548,7 +1554,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         var instr = LLVMGetFirstInstruction(bb)
         while (instr != null) {
-            log.debug("Parsing {}", frontend.codeOf(instr))
+            log.info("Parsing {}", frontend.codeOf(instr))
 
             val stmt = frontend.statementHandler.handle(instr)
             if (stmt != null) {
