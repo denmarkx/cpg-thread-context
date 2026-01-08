@@ -199,14 +199,23 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             global = LLVMGetNextGlobal(global)
         }
 
+        // we're interested in "obscured" functions (ie: no body)
+        // this is only for resolving their inner call graph if needed.
+        // these signatures always appear last, so we traverse upwards to avoid iterating through all funcs
+        // the ONLY exception to this is the main entry point
+        // though it remains a TODO: such that the main entry is not always @main (see: nostd)
+        var sig = LLVMGetLastFunction(mod)
+        while (sig != null) {
+            val block = LLVMGetFirstBasicBlock(sig)
+            if (block == null || block.isNull) {
+                obscuredFunctions.add(sig)
+            } else if (sig.name != "main") break
+            sig = LLVMGetPreviousFunction(sig)
+        }
+
         // loop through functions
         var func = LLVMGetFirstFunction(mod)
         while (func != null) {
-            // check if this is a function that is "obscured" (ie: no body)
-            if (LLVMGetFirstBasicBlock(func) == null) {
-                obscuredFunctions.add(func)
-            }
-
             // try to parse the function (declaration)
             val declaration = declarationHandler.handle(func)
             if (declaration != null) {
@@ -249,43 +258,56 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         val parseStatus = LLVMParseBitcodeInContext2(context, buffer, module)
         if (parseStatus != 0) return
 
+        val personalityFuncs = mutableSetOf<LLVMValueRef>()
 
         var function = LLVMGetFirstFunction(module)
         while (function != null) {
-            val calls = mutableSetOf<String>()
+            // Personality functions cause a segfault.
+            if (LLVMHasPersonalityFn(function) == 1) {
+                personalityFuncs.add(LLVMGetPersonalityFn(function))
+            }
+
+            if (function in personalityFuncs) {
+                function = LLVMGetNextFunction(function)
+                continue
+            }
+
             var useRef = LLVMGetFirstUse(function)
             while (useRef != null) {
                 val useValue = LLVMGetUser(useRef)
                 val kind = LLVMGetTypeKind(LLVMTypeOf(useValue))
 
-                // TODO: Function pointers and global constants aren't handled.
-                if ((kind == LLVMPointerTypeKind || kind == LLVMStructTypeKind)
-                    && useValue.opCode != LLVMCall) {
+                // TODO: global constants, variables, values, aliases aren't handled
+                //  similarly, struct constants that are 100% global constants aren't considered global constants
+                //  and I can't figure out their classification.
+
+                // TODO: ptrtoint and inttoptr instructions segfault
+                if (
+                    ((kind == LLVMStructTypeKind) && useValue.opCode != LLVMCall) ||
+                    useValue.isGlobal() ||
+                    useValue.isPtrConversionInstr()) {
                     useRef = LLVMGetNextUse(useRef)
                     continue
                 }
 
                 val block = LLVMGetInstructionParent(useValue)
-                if (block == null) {
+                if (block == null || block.isNull) {
                     useRef = LLVMGetNextUse(useRef)
                     continue
                 }
 
-                // TODO: ptrtoint segfaults due to the BasicBlockRef from GetInstructionParent
-                //  being a bogus value (but non-null).
                 val parent = LLVMGetBasicBlockParent(block)
-                if (parent == null) {
+                if (parent == null || parent.isNull) {
                     useRef = LLVMGetNextUse(useRef)
                     continue
                 }
 
-                calls.add(LLVMGetValueName(parent).string)
+                externalCallGraph.putIfAbsent(parent.name, mutableSetOf())
+                externalCallGraph[parent.name]?.add(function.name)
+
                 useRef = LLVMGetNextUse(useRef)
             }
 
-            if (!calls.isEmpty()) {
-                externalCallGraph[LLVMGetValueName(function).string] = calls
-            }
             function = LLVMGetNextFunction(function)
         }
     }
@@ -431,3 +453,30 @@ inline val LLVMValueRef.opCode: Int
     get() {
         return LLVMGetInstructionOpcode(this)
     }
+
+/**
+ * Returns boolean if instruction is a global variable, alias, constant, object, or func.
+ * Global constants that are within a struct do not satisfy these conditions for an unknown reason.
+*/
+fun LLVMValueRef.isGlobal(): Boolean {
+    val candidate = listOf(
+        LLVMIsAGlobalObject(this),
+        LLVMIsAGlobalAlias(this),
+        LLVMIsAGlobalValue(this),
+        LLVMIsAGlobalVariable(this),
+        LLVMIsAGlobalIFunc(this)
+    )
+    return candidate.any { it != null }
+}
+
+
+/**
+ * Returns boolean if instruction is a ptrtoint or inttoptr.
+*/
+fun LLVMValueRef.isPtrConversionInstr(): Boolean {
+    val candidate = listOf(
+        LLVMIsAPtrToIntInst(this),
+        LLVMIsAIntToPtrInst(this),
+    )
+    return candidate.any { it != null }
+}
