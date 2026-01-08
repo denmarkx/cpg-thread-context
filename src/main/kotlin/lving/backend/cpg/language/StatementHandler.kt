@@ -1160,6 +1160,10 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             return frontend.heapLifetimeHandler.handle(instr, calledFunc)
         }
 
+        if (frontend.concurrencyHandler.isConcurrencyCall(calledFunc)) {
+            return frontend.concurrencyHandler.handle(instr, calledFunc)
+        }
+
         var gotoCatch: GotoStatement = newGotoStatement(rawNode = instr)
         gotoCatch.applyMetadataExt(instr, frontend)
         var tryContinue: GotoStatement = newGotoStatement(rawNode = instr)
@@ -1730,6 +1734,11 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             if (firstLine.contains(":")) {
                 labelName = firstLine.substring(0, firstLine.indexOf(":"))
             }
+        }
+
+        // TODO: the starting label is not always zero.
+        if (labelName.isNullOrEmpty()) {
+            labelName = "0"
         }
         return labelName
     }
