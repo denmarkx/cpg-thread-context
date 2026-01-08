@@ -20,21 +20,19 @@ import lving.backend.cpg.graph.scheduleDeletion
 import lving.backend.cpg.graph.setMetadata
 import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.utils.Demangle
+import org.bytedeco.javacpp.IntPointer
+import org.bytedeco.javacpp.Pointer
+import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.javacpp.SizeTPointer
+import org.bytedeco.javacpp.annotation.ArrayAllocator
+import org.bytedeco.llvm.LLVM.LLVMAttributeRef
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
+import org.bytedeco.llvm.LLVM.LLVMTypeRef
 import java.util.Collections
 import java.util.IdentityHashMap
 
-/**
- * This exists solely because the Gradle build that uses this repository as a lib is discarding the
- * llvm.dbg.declare intrinsic calls that we replace the debug records with.
- * I can't seem to figure out why this is the case.
- *
- * We aren't able to use debug record calls since bytedeco bindings are currently broken for those.
-*/
-val LLVM_DBG_DECLARE_NAME = "llvm.dbg.declare2"
-
 var deferredDebugSpill = Collections.synchronizedMap<ValueDeclaration, List<String>>(IdentityHashMap())
+var attributeCache = mutableMapOf<LLVMValueRef, MutableList<LLVMAttributeRef>>()
 
 /*
 * When Node.applyMetadataExt is called, the <x>.dbg.spill reference
@@ -118,13 +116,55 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
     }
 }
 
+fun handleFunctionAttributes(instr: LLVMValueRef, node: Node?) {
+    if (instr in attributeCache) {
+        node?.setFunctionAttributes(attributeCache[instr]!!)
+        return
+    }
+
+    val attrCount = LLVMGetAttributeCountAtIndex(instr, LLVMAttributeFunctionIndex)
+    if (attrCount == 0) return
+
+    // to avoid explicit dyn casting to an LLVMAttributeRef (since PointerPointer::get rets a Pointer)
+    // these are kept in our own list later on:
+    val attributes = mutableListOf<LLVMAttributeRef>()
+
+    // allocate enough memory for an array of <attrCount> items.
+    val attributesPtr = PointerPointer<LLVMAttributeRef>(
+        (Pointer.sizeof(LLVMAttributeRef::class.java) * attrCount).toLong())
+    for (i in 0..<attrCount) { attributesPtr.put(LLVMAttributeRef()) }
+    LLVMGetAttributesAtIndex(instr, LLVMAttributeFunctionIndex, attributesPtr)
+
+    for (i in 0..<attrCount) {
+        attributes.add(attributesPtr.get(LLVMAttributeRef::class.java, i.toLong()))
+    }
+    attributeCache[instr] = attributes
+    node?.setFunctionAttributes(attributes)
+}
+
+fun Node.setFunctionAttributes(attributes: MutableList<LLVMAttributeRef>) {
+    val strPointer = IntPointer(64)
+    attributes.forEach {
+        if (LLVMIsStringAttribute(it) > 0) {
+            val key = LLVMGetStringAttributeKind(it, strPointer).string
+            val value = LLVMGetStringAttributeValue(it, strPointer).string
+            setProperty(this, key, value)
+        }
+    }
+}
+
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
-    if (this.getTrueName() == LLVM_DBG_DECLARE_NAME) {
+    if (this.getTrueName() == "llvm.dbg.declare") {
         scheduleDeletion(this)
         if (this is FunctionDeclaration) {
             this.parameters.forEach { scheduleDeletion(it) }
         }
     }
+
+    if (this is FunctionDeclaration) {
+        handleFunctionAttributes(instr, this)
+    }
+
     if (LLVMHasMetadata(instr) == 0) return
 
     // LLVMInstructionGetDebugLoc on a FuncDecl will return null even though they may have a dbg loc..
@@ -164,7 +204,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
 
     // The only exception to that are literals. Those will be directly stored within the dbg.spill
     // register and are sort of useless.
-    if (this.getTrueName() == LLVM_DBG_DECLARE_NAME) {
+    if (this.getTrueName() == "llvm.dbg.declare") {
         if (this is CallExpression) {
             // handle metadata ptr undef
             if (this.arguments[0] is ProblemExpression) {
@@ -208,7 +248,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
             // A captured borrow is passed as a regular arg to the closure call.
             // luckily, the metadata kinda saves this within DICompositeType.
             // llvm.dbg.declare <reg>, <!000>, <!DIExpression()>
-            if (this.name.localName == LLVM_DBG_DECLARE_NAME) {
+            if (this.name.localName == "llvm.dbg.declare") {
                 if (this.arguments.isEmpty()) return
                 val reference = this.arguments[0]
 
@@ -290,4 +330,11 @@ fun LLVMValueRef.print() {
 */
 fun LLVMMetadataRef.print() {
     println(LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, this)).string)
+}
+
+/**
+ * Prints the LLVMTypeRef to stdout.
+*/
+fun LLVMTypeRef.print() {
+    println(LLVMPrintTypeToString(this).string)
 }
