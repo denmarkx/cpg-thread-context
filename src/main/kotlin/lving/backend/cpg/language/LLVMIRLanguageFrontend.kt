@@ -41,6 +41,7 @@ import de.fraunhofer.aisec.cpg.passes.CompressLLVMPass
 import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import de.fraunhofer.aisec.cpg.passes.configuration.RegisterExtraPass
 import de.fraunhofer.aisec.cpg.sarif.PhysicalLocation
+import org.bytedeco.javacpp.BytePointer
 import java.io.File
 import java.nio.ByteBuffer
 import org.bytedeco.javacpp.Pointer
@@ -60,6 +61,13 @@ val dbgRecordIntrinsic = mapOf(
     "dbg_declare" to "llvm.dbg.declare",
 )
 
+/**
+ * Since languages may delegate important calls to its standard library (or other library),
+ * we don't always want to parse those as extra translation units or generate with -lto.
+ * Currently accepted only as bitcode (solely because of filesize).
+*/
+val externalLibraryFiles = mutableListOf<File>()
+
 @RegisterExtraPass(CompressLLVMPass::class)
 class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRLanguageFrontend>) :
     LanguageFrontend<Pointer, LLVMTypeRef>(ctx, language) {
@@ -67,12 +75,20 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val statementHandler = StatementHandler(this)
     val declarationHandler = DeclarationHandler(this)
     val expressionHandler = ExpressionHandler(this)
+
     val intrinsicHandler = IntrinsicHandler(this)
     val heapLifetimeHandler = HeapLifetimeHandler(this)
-    val typeCache = mutableMapOf<String, Type>()
+    val concurrencyHandler = ConcurrencyHandler(this)
 
+    val typeCache = mutableMapOf<String, Type>()
     val phiList = mutableListOf<LLVMValueRef>()
 
+    /** Some functions within our non-lto IR may contain only the function signature. */
+    val obscuredFunctions = mutableListOf<LLVMValueRef>()
+
+    val externalCallGraph = mutableMapOf<String, MutableSet<String>>()
+
+    init { externalLibraryFiles.forEach { parseBitcode(it) } }
 
     /**
      * This contains a cache binding between an LLVMValueRef (representing a variable) and its
@@ -186,6 +202,11 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         // loop through functions
         var func = LLVMGetFirstFunction(mod)
         while (func != null) {
+            // check if this is a function that is "obscured" (ie: no body)
+            if (LLVMGetFirstBasicBlock(func) == null) {
+                obscuredFunctions.add(func)
+            }
+
             // try to parse the function (declaration)
             val declaration = declarationHandler.handle(func)
             if (declaration != null) {
@@ -207,6 +228,66 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         bench.addMeasurement()
 
         return tu
+    }
+
+    /**
+     * Parses LLVM bitcode given a .bc file. This is solely used to generate a call-graph
+     * from a source file that was generated with -lto. This allows us to see if
+     * a high-level function, which is normally just the func. signature and is prog-lang.
+     * specific, is calling a lower-level (specifically, native) function.
+    */
+    fun parseBitcode(file: File) {
+        val module = LLVMModuleRef()
+        val context = LLVMContextCreate()
+        val buffer = LLVMMemoryBufferRef()
+        val error = ByteBuffer.allocate(10000)
+
+        val status = LLVMCreateMemoryBufferWithContentsOfFile(
+            BytePointer(file.path), buffer, error)
+        if (status != 0) return
+
+        val parseStatus = LLVMParseBitcodeInContext2(context, buffer, module)
+        if (parseStatus != 0) return
+
+
+        var function = LLVMGetFirstFunction(module)
+        while (function != null) {
+            val calls = mutableSetOf<String>()
+            var useRef = LLVMGetFirstUse(function)
+            while (useRef != null) {
+                val useValue = LLVMGetUser(useRef)
+                val kind = LLVMGetTypeKind(LLVMTypeOf(useValue))
+
+                // TODO: Function pointers and global constants aren't handled.
+                if ((kind == LLVMPointerTypeKind || kind == LLVMStructTypeKind)
+                    && useValue.opCode != LLVMCall) {
+                    useRef = LLVMGetNextUse(useRef)
+                    continue
+                }
+
+                val block = LLVMGetInstructionParent(useValue)
+                if (block == null) {
+                    useRef = LLVMGetNextUse(useRef)
+                    continue
+                }
+
+                // TODO: ptrtoint segfaults due to the BasicBlockRef from GetInstructionParent
+                //  being a bogus value (but non-null).
+                val parent = LLVMGetBasicBlockParent(block)
+                if (parent == null) {
+                    useRef = LLVMGetNextUse(useRef)
+                    continue
+                }
+
+                calls.add(LLVMGetValueName(parent).string)
+                useRef = LLVMGetNextUse(useRef)
+            }
+
+            if (!calls.isEmpty()) {
+                externalCallGraph[LLVMGetValueName(function).string] = calls
+            }
+            function = LLVMGetNextFunction(function)
+        }
     }
 
     override fun typeOf(type: LLVMTypeRef): Type {
