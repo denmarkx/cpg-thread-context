@@ -6,14 +6,19 @@ import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
 
+enum class LifetimeOperations {
+    LIFETIME_START,
+    LIFETIME_END,
+}
+
 class LifetimeOperation : CallExpression() {
     @Relationship("LIFETIME", direction = Relationship.Direction.OUTGOING)
-    val nodes = mutableListOf<VariableDeclaration>()
+    val variables = mutableListOf<VariableDeclaration>()
 
     /**
      * LIFETIME_START | LIFETIME_END
     */
-    var operation = ""
+    var operation : LifetimeOperations? = null
 }
 
 /**
@@ -33,6 +38,7 @@ class IntrinsicHandler(val frontend: LLVMIRLanguageFrontend) {
         val statement = when (name) {
             "llvm.lifetime.start.p0" -> handleLifetimeStart(instr)
             "llvm.lifetime.end.p0" -> handleLifetimeEnd(instr)
+            "llvm.dbg.value" -> handleDebugValue(instr)
             else -> { null }
         }
         return statement
@@ -53,8 +59,8 @@ class IntrinsicHandler(val frontend: LLVMIRLanguageFrontend) {
         val decl = frontend.bindingsCache[allocationName] as VariableDeclaration
 
         val lifetimeOp = LifetimeOperation()
-        lifetimeOp.operation = "LIFETIME_START"
-        lifetimeOp.nodes.add(decl)
+        lifetimeOp.operation = LifetimeOperations.LIFETIME_START
+        lifetimeOp.variables.add(decl)
         return lifetimeOp
     }
 
@@ -73,8 +79,26 @@ class IntrinsicHandler(val frontend: LLVMIRLanguageFrontend) {
         val decl = frontend.bindingsCache[allocationName] as VariableDeclaration
 
         val lifetimeOp = LifetimeOperation()
-        lifetimeOp.operation = "LIFETIME_END"
-        lifetimeOp.nodes.add(decl)
+        lifetimeOp.operation = LifetimeOperations.LIFETIME_END
+        lifetimeOp.variables.add(decl)
         return lifetimeOp
+    }
+
+    /**
+     * Provides information when a user source variable is set to a new value.
+     * Consider:
+     *   let x = Box::new(1);
+     *   let ptr: *const Box<i32> = &x; // Assume !dbg !1
+     *
+     *   The following instruction translates to: source variable
+     *   "ptr" (!dbg !1) is set to register x.
+     *   We can assume that operations on "ptr" will mutate x.
+     *   #dbg_value(ptr %x, !1, ...)
+     *
+     * llvm.dbg.value(metadata <register>, metadata <DILocalVariable>, metadata <ComplexExpression>, metadata <DebugInfo>)
+     * https://llvm.org/docs/SourceLevelDebugging.html#llvm-dbg-value
+    */
+    fun handleDebugValue(instr: LLVMValueRef) : CallExpression? {
+        return null
     }
 }

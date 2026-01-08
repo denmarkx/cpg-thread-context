@@ -1155,6 +1155,11 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             calledFuncName = opName.name
         }
 
+        // We intercede the currently created call expression if it contains any sort of alloctype
+        if (frontend.heapLifetimeHandler.isLifetimeCall(calledFunc)) {
+            return frontend.heapLifetimeHandler.handle(instr, calledFunc)
+        }
+
         var gotoCatch: GotoStatement = newGotoStatement(rawNode = instr)
         gotoCatch.applyMetadataExt(instr, frontend)
         var tryContinue: GotoStatement = newGotoStatement(rawNode = instr)
@@ -1516,7 +1521,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
      * [valueRef]. In case the variable assignment is optional, and we directly return the
      * [Expression] associated with the instruction.
      */
-    private fun declarationOrNot(rhs: Expression, valueRef: LLVMValueRef): Statement {
+     fun declarationOrNot(rhs: Expression, valueRef: LLVMValueRef): Statement {
         val namePair = frontend.getNameOf(valueRef)
         val lhs = namePair.first
         val symbolName = namePair.second
@@ -1551,6 +1556,10 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
      */
     private fun handleBasicBlock(bb: LLVMBasicBlockRef): Statement {
         val compound = newBlock(rawNode = bb)
+        val labelName = getBasicBlockName(bb)
+        compound.name = Name(labelName)
+
+        frontend.scopeManager.enterScope(compound)
 
         var instr = LLVMGetFirstInstruction(bb)
         while (instr != null) {
@@ -1564,8 +1573,6 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             instr = LLVMGetNextInstruction(instr)
         }
 
-        val labelName = getBasicBlockName(bb)
-
         if (labelName != "") {
             val labelStatement = newLabelStatement()
             labelStatement.name = Name(labelName)
@@ -1574,6 +1581,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
             return labelStatement
         }
+        frontend.scopeManager.leaveScope(compound)
         return compound
     }
 

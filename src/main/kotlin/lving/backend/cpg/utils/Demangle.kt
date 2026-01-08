@@ -1,5 +1,8 @@
 package lving.backend.cpg.utils
 
+// https://rust-lang.github.io/rfcs/2603-rust-symbol-name-mangling-v0.html
+// rustc uses an alternative mangling scheme (v0)
+
 // https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
 // rust uses C++-style mangling, but it's not exact:
 // - symbols prefixed with _ZN
@@ -8,6 +11,7 @@ package lving.backend.cpg.utils
 // - hashes come before the 'E' whose format is <length><hash>E
 
 object Demangle {
+
     fun demangle(s: String): String {
         var inner = ""
 
@@ -16,6 +20,9 @@ object Demangle {
             inner = s.substring(3, s.length - 1)
         } else if (s.startsWith("ZN") && s.endsWith("E")) {
             inner = s.substring(2, s.length - 1)
+//        } else if (s.startsWith("_R")) {
+//            val split = s.split("_")
+//            return demangleV0(split.subList(2, split.size).joinToString("_"))
         } else {
             return s
         }
@@ -118,5 +125,40 @@ object Demangle {
         // remove trailing :: from path:
         path.delete(path.length - 2, path.length)
         return path.toString()
+    }
+
+    fun walkDigits(start: Int, str: String) : List<Int> {
+        var index = start
+        var c = str[index]
+        val lengthStr = StringBuilder()
+
+        while (Character.isDigit(c)) {
+            c = str[index]
+            if (!Character.isDigit(c)) break
+            lengthStr.append(c)
+            index++
+            if (index >= str.length) break
+        }
+
+        return listOf(Integer.parseInt(lengthStr.toString()), (index-1) - start)
+    }
+
+    fun demangleV0(s: String): String {
+        val str = StringBuilder()
+        var index = 0
+
+        while (index < s.length) {
+            val char = s[index]
+            if (char.isDigit()) {
+                val info = walkDigits(index, s)
+                val start = index + (info[1] + 2)
+                str.append(s.substring(start, start + info[0]))
+                index += info[1] + info[0] + 2
+                continue
+            }
+            str.append(char)
+            index++
+        }
+        return str.toString()
     }
 }

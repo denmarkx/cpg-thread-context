@@ -68,6 +68,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val declarationHandler = DeclarationHandler(this)
     val expressionHandler = ExpressionHandler(this)
     val intrinsicHandler = IntrinsicHandler(this)
+    val heapLifetimeHandler = HeapLifetimeHandler(this)
     val typeCache = mutableMapOf<String, Type>()
 
     val phiList = mutableListOf<LLVMValueRef>()
