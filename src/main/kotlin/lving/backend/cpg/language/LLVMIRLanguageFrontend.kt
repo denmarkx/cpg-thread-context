@@ -86,7 +86,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     /** Some functions within our non-lto IR may contain only the function signature. */
     val obscuredFunctions = mutableListOf<LLVMValueRef>()
 
-    val externalCallGraph = mutableMapOf<String, MutableSet<String>>()
+    val externalCallGraph = mutableMapOf<String, MutableSet<LLVMValueRef>>()
 
     init { externalLibraryFiles.forEach { parseBitcode(it) } }
 
@@ -303,7 +303,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
                 }
 
                 externalCallGraph.putIfAbsent(parent.name, mutableSetOf())
-                externalCallGraph[parent.name]?.add(function.name)
+                externalCallGraph[parent.name]?.add(useValue)
 
                 useRef = LLVMGetNextUse(useRef)
             }
