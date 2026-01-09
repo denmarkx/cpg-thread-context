@@ -87,6 +87,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val obscuredFunctions = mutableListOf<LLVMValueRef>()
 
     val externalCallGraph = mutableMapOf<String, MutableSet<LLVMValueRef>>()
+    val internalFileNames = mutableListOf<String>()
 
     init { externalLibraryFiles.forEach { parseBitcode(it) } }
 
@@ -99,6 +100,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     var bindingsCache = mutableMapOf<String, Declaration>()
 
     override fun parse(file: File): TranslationUnitDeclaration {
+        internalFileNames.add(file.name)
         var bench = Benchmark(this.javaClass, "Parsing sourcefile")
         // clear the bindings cache, because it is just valid within one module
         bindingsCache.clear()

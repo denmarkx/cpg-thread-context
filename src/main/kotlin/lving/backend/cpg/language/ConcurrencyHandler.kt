@@ -3,13 +3,19 @@ package lving.backend.cpg.language
 import de.fraunhofer.aisec.cpg.graph.MetadataProvider
 import de.fraunhofer.aisec.cpg.graph.Name
 import de.fraunhofer.aisec.cpg.graph.applyMetadata
+import de.fraunhofer.aisec.cpg.graph.calls
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.newCallExpression
 import de.fraunhofer.aisec.cpg.graph.newReference
+import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import lving.backend.cpg.graph.getProperties
+import lving.backend.cpg.graph.getProperty
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM
 import org.bytedeco.llvm.global.LLVM.*
+import org.neo4j.ogm.annotation.Relationship
 
 enum class ConcurrencyOperations {
     CREATE_THREAD
@@ -25,6 +31,9 @@ val NativeCallMap = mapOf(
 
 class ThreadOperation : CallExpression() {
     var operation : ConcurrencyOperations? = null
+
+    @Relationship("ROUTINE", direction = Relationship.Direction.OUTGOING)
+    val routines = mutableListOf<FunctionDeclaration>()
 }
 
 class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
@@ -54,7 +63,10 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
         //  Some programming languages will pass a function pointer as a thread parameter and then an
         //  intermediate library function as the entry point. I haven't found any sort of common ground to know
-        //  where the thread actually starts, especially since that function pointer is stored within a vtable.V
+        //  where the thread actually starts, especially since that function pointer is stored within a vtable.
+
+        // TODO: C++ (std::thread) and Rust pass a struct { ptr data, ...} to the thread param
+
         val entry = LLVMGetOperand(call, entryOperand)
         val data = LLVMGetOperand(call, dataOperand)
 
@@ -123,6 +135,23 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
         val operandName = frontend.getOperandValueAtIndex(shim, 1)
         threadOperation.addArgument(operandName)
+
+        val t = frontend.scopeManager.lookupSymbolByName(Name(shim.name), frontend.language).first() as FunctionDeclaration
+
+        // obviously still very rust specific
+        val x = t.calls.last { it.getTrueName().startsWith("std::sys::backtrace") }
+        val y = frontend.scopeManager.lookupSymbolByName(Name(x.name.localName), frontend.language).first() as FunctionDeclaration
+
+        var local = 0
+        y.nodes.forEach {
+            if (getProperty(it, "filename")?.replaceAfterLast(".", "ll") in frontend.internalFileNames) {
+                local = 1
+                return@forEach
+            }
+        }
+
+        // TODO: if this is false, we'll have to walk through
+        threadOperation.routines.add(y)
 
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
     }
