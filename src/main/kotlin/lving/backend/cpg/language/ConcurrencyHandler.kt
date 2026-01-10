@@ -5,15 +5,14 @@ import de.fraunhofer.aisec.cpg.graph.Name
 import de.fraunhofer.aisec.cpg.graph.applyMetadata
 import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.newCallExpression
 import de.fraunhofer.aisec.cpg.graph.newReference
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
-import lving.backend.cpg.graph.getProperties
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import lving.backend.cpg.graph.getProperty
 import org.bytedeco.llvm.LLVM.LLVMValueRef
-import org.bytedeco.llvm.global.LLVM
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
 
@@ -34,6 +33,9 @@ class ThreadOperation : CallExpression() {
 
     @Relationship("ROUTINE", direction = Relationship.Direction.OUTGOING)
     val routines = mutableListOf<FunctionDeclaration>()
+
+    @Relationship("DATA", direction = Relationship.Direction.OUTGOING)
+    val data = mutableListOf<Expression>()
 }
 
 class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
@@ -68,7 +70,8 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         // TODO: C++ (std::thread) and Rust pass a struct { ptr data, ...} to the thread param
 
         val entry = LLVMGetOperand(call, entryOperand)
-        val data = LLVMGetOperand(call, dataOperand)
+        val canonicalData = LLVMGetOperand(call, dataOperand)
+        val logicalData = LLVMGetOperand(cpgCall, 1)
 
         val param = LLVMGetParam(entry, 0)
         val paramAccess = mutableSetOf<LLVMValueRef>()
@@ -117,9 +120,8 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
          */
         val vtable = LLVMGetOperand(cpgCall, 2) // LLVMGetTypeKind(LLVMGetElementType(LLVMTypeOf(... -> 13 vec
         val vtable2 = LLVMGetInitializer(vtable)
-
         val shim = LLVMGetAggregateElement(vtable2, 2) // funcdecl
-        shim.isFunctionUserDefined(frontend)
+//        shim.isFunctionUserDefined(frontend)
 
         // for rust, shim -> some sys::backtrace call will lead us to the thread start.
         // closure may be inlined, but the direct call from backtrace would be the closure.
@@ -152,6 +154,13 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
         // TODO: if this is false, we'll have to walk through
         threadOperation.routines.add(y)
+
+        val data = frontend.getOperandValueAtIndex(cpgCall, 1) as Reference
+        threadOperation.data.add(data)
+
+        // this is a very arbitrary way to connect the data passed in from the start thread to the new threads.
+        // it only exists because of the graph disconnection stemming from the func ptr
+        y.parameters.first().prevDFG.add(data)
 
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
     }
