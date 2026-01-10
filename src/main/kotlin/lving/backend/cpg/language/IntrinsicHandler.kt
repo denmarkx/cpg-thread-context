@@ -1,7 +1,10 @@
 package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.newProblemExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
@@ -32,13 +35,15 @@ class LifetimeOperation : CallExpression() {
 */
 class IntrinsicHandler(val frontend: LLVMIRLanguageFrontend) {
 
-    fun handle(instr: LLVMValueRef) : CallExpression? {
+    fun handle(instr: LLVMValueRef) : Expression? {
         val function = LLVMGetCalledValue(instr)
         val name = LLVMGetValueName(function).string
         val statement = when (name) {
             "llvm.lifetime.start.p0" -> handleLifetimeStart(instr)
             "llvm.lifetime.end.p0" -> handleLifetimeEnd(instr)
             "llvm.dbg.value" -> handleDebugValue(instr)
+            "llvm.dbg.assign" -> handleDebugValue(instr)
+            "llvm.dbg.declare" -> handleDebugValue(instr)
             else -> { null }
         }
         return statement
@@ -98,7 +103,7 @@ class IntrinsicHandler(val frontend: LLVMIRLanguageFrontend) {
      * llvm.dbg.value(metadata <register>, metadata <DILocalVariable>, metadata <ComplexExpression>, metadata <DebugInfo>)
      * https://llvm.org/docs/SourceLevelDebugging.html#llvm-dbg-value
     */
-    fun handleDebugValue(instr: LLVMValueRef) : CallExpression? {
-        return null
+    fun handleDebugValue(instr: LLVMValueRef) : ProblemExpression? {
+        return frontend.newProblemExpression()
     }
 }

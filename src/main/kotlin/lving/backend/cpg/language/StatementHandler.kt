@@ -1142,7 +1142,9 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         // Intrinsics are handled elsewhere:
         if (calledFuncName.startsWith("llvm")) {
-            return frontend.intrinsicHandler.handle(instr)
+            val statement = frontend.intrinsicHandler.handle(instr)
+            if (statement is ProblemExpression) return null
+            if (statement != null) return statement
         }
 
         var max = LLVMGetNumOperands(instr) - 1
@@ -1200,6 +1202,12 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         while (idx < max) {
             val operandName = frontend.getOperandValueAtIndex(instr, idx)
             callExpr.addArgument(operandName)
+
+            // TODO: technically the intrinsic handler should be doing this
+            // symbolresolver for llvm.memcpy intrinsic will incorrectly mark this as a read
+            if (calledFuncName.startsWith("llvm.memcpy") && idx == 0) {
+                (operandName as Reference).access = AccessValues.WRITE
+            }
 
             if (callFuncNameDemangled.trim().endsWith("{{closure}}")) {
                 handleClosureCandidate(operandName as Reference)
