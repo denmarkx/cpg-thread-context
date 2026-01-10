@@ -211,7 +211,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             val block = LLVMGetFirstBasicBlock(sig)
             if (block == null || block.isNull) {
                 obscuredFunctions.add(sig)
-            } else if (sig.name != "main") break
+            } // ok this is unordered else if (sig.name != "main") break
             sig = LLVMGetPreviousFunction(sig)
         }
 
@@ -285,7 +285,8 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
                 // TODO: ptrtoint and inttoptr instructions segfault
                 if (
-                    ((kind == LLVMStructTypeKind) && useValue.opCode != LLVMCall) ||
+                    ((kind == LLVMStructTypeKind) &&
+                            (useValue.opCode != LLVMCall && useValue.opCode != LLVMInvoke)) ||
                     useValue.isGlobal() ||
                     useValue.isPtrConversionInstr()) {
                     useRef = LLVMGetNextUse(useRef)

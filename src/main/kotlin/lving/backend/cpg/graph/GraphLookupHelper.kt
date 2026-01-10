@@ -119,18 +119,17 @@ fun getLHSFromCall(call: CallExpression): Set<VariableDeclaration> {
 /*
  * Returns the function path from CallExpr -> name
 */
-fun CallExpression.resolveUntilHit(name: String, endsWith : Boolean = false): List<CallExpression> {
+fun CallExpression.resolveUntilHit(name: String, endsWith : Boolean = false, ignoreList: List<Node>): List<CallExpression> {
     val route = mutableListOf<CallExpression>()
 
     fun traverse(current: FunctionDeclaration, visited: MutableList<Node>): Boolean {
         if (endsWith && current.getTrueName().endsWith(name)) return true
         if (current.getTrueName() == name) return true
         visited.add(current)
-
         current.calls.forEach {
             it.invokes.forEach { f ->
                 if (f !in visited) {
-                    if (traverse(f, visited)) {
+                    if (traverse(f, visited) && it !in ignoreList) {
                         route.addFirst(it)
                         return true
                     }
@@ -148,9 +147,9 @@ fun CallExpression.resolveUntilHit(name: String, endsWith : Boolean = false): Li
 /*
  * Returns the function path from FuncDecl -> name
 */
-fun FunctionDeclaration.resolveUntilHit(name: String, endsWith : Boolean = false): List<CallExpression> {
+fun FunctionDeclaration.resolveUntilHit(name: String, endsWith : Boolean = false, ignoreList: List<Node>): List<CallExpression> {
     this.calls.forEach {
-        val candidate = it.resolveUntilHit(name)
+        val candidate = it.resolveUntilHit(name, endsWith, ignoreList)
         if (candidate.size >= 2) return candidate
     }
     return listOf()

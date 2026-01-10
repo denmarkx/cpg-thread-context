@@ -55,7 +55,6 @@ class FunctionPtrResolver(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 astParent = astParent.astParent
             }
 
-            if (astParent == null) return@forEach
 
             // From this FuncDecl, we are interested in the parameter that has the same code value as our reference.
             // Since our actual call function pointer may be stored in another intermediate register,
@@ -69,7 +68,7 @@ class FunctionPtrResolver(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             val validOperatorBase = nextDeclaration.nodes[nextDeclaration.nodes.size-2]
             if (validOperatorBase !is Reference) return@forEach
 
-            val correspondingParam = astParent.parameters.find { p -> p.code == validOperatorBase.code }
+            val correspondingParam = astParent?.parameters?.find { p -> p.code == validOperatorBase.code }
 
             // Normally, we would potentially say that callExpr - [INVOKES] -> correspondingParam..but
             // Node.invokes expects a FuncDecl. Since it's ambiguious what callExpr can invoke,

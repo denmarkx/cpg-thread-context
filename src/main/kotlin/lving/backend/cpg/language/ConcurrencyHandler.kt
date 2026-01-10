@@ -135,7 +135,16 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         callee.resolutionHelper = threadOperation
         threadOperation.callee = callee
 
-        val operandName = frontend.getOperandValueAtIndex(shim, 1)
+        val data0 = frontend.getOperandValueAtIndex(cpgCall, 1) as Reference
+        threadOperation.data.add(data0)
+        threadOperation.arguments.add(data0)
+
+        // There is no guarantee that the shim declaration will appear before the thread call.
+        return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
+
+
+        LLVMGetOperand(shim, 0).print()
+        val operandName = frontend.getOperandValueAtIndex(shim, 0)
         threadOperation.addArgument(operandName)
 
         val t = frontend.scopeManager.lookupSymbolByName(Name(shim.name), frontend.language).first() as FunctionDeclaration
