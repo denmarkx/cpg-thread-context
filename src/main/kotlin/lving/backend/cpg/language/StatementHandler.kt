@@ -30,6 +30,8 @@ import de.fraunhofer.aisec.cpg.frontends.TranslationException
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.edges.dataflows
+import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
 import de.fraunhofer.aisec.cpg.graph.get
 import de.fraunhofer.aisec.cpg.graph.invoke
 import de.fraunhofer.aisec.cpg.graph.statements.*
@@ -1215,6 +1217,12 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             idx++
         }
         callExpr.applyMetadataExt(instr, frontend)
+
+        // dfg also won't recognize this, but for memcpy.. arg 1 --[dfg]--> arg 0
+        if (calledFuncName.startsWith("llvm.memcpy")) {
+            callExpr.arguments[1].nextDFG.add(callExpr.arguments[0])
+        }
+
 
         if (instr.opCode == LLVMInvoke) {
             // For the "invoke" instruction, the call is surrounded by a try statement which also

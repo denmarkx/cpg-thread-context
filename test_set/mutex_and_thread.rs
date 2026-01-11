@@ -8,12 +8,12 @@ fn main() {
     let mut data = Arc::clone(&a);
     let t = thread::spawn(move || {
         let mut guard = data.lock().unwrap();
-        *guard = 6;
+        *guard = 42144;
     }).join().unwrap();
 
     let mut data = Arc::clone(&a);
     let t2 = thread::spawn(move || {
         let mut guard = data.lock().unwrap();
-        *guard = 7;
+        *guard = 7123;
     }).join().unwrap();
 }

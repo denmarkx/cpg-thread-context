@@ -36,6 +36,13 @@ class ThreadOperation : CallExpression() {
 
     @Relationship("DATA", direction = Relationship.Direction.OUTGOING)
     val data = mutableListOf<Expression>()
+
+    @Relationship("THREAD_JOIN", direction = Relationship.Direction.OUTGOING)
+    var threadJoin : CallExpression? = null
+
+    @Relationship("THREAD_START", direction = Relationship.Direction.OUTGOING)
+    var threadStart : CallExpression? = null
+
 }
 
 class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
