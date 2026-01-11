@@ -1,5 +1,6 @@
 package lving.backend.cpg.language
 
+import de.fraunhofer.aisec.cpg.frontends.LanguageFrontend
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
@@ -20,12 +21,14 @@ import lving.backend.cpg.graph.scheduleDeletion
 import lving.backend.cpg.graph.setMetadata
 import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.utils.Demangle
+import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.IntPointer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.javacpp.SizeTPointer
 import org.bytedeco.javacpp.annotation.ArrayAllocator
 import org.bytedeco.llvm.LLVM.LLVMAttributeRef
+import org.bytedeco.llvm.LLVM.LLVMDIBuilderRef
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
 import org.bytedeco.llvm.LLVM.LLVMTypeRef
 import java.util.Collections
@@ -309,6 +312,40 @@ fun Node.setLocationInfo(filename: String, line: Int) {
     setProperty(this, "filename", filename)
     setProperty(this, "line", line.toString())
     setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
+}
+
+/**
+ * Given an LLVMValueRef that is a function, determine if any of the instructions are a part
+ * of the translation units in the given frontend. This is strictly done through debug info and is very conservative.
+*/
+fun LLVMValueRef.isFunctionUserDefined(frontend: LLVMIRLanguageFrontend) : Boolean {
+    if (LLVMIsAFunction(this) == null) return this.isUserDefined(frontend)
+
+    var block = LLVMGetFirstBasicBlock(this)
+    while (block != null) {
+        var instruction = LLVMGetFirstInstruction(block)
+        while (instruction != null) {
+            if (instruction.isUserDefined(frontend)) return true
+            instruction = LLVMGetNextInstruction(instruction)
+        }
+        block = LLVMGetNextBasicBlock(block)
+    }
+
+    return false
+}
+
+/**
+ * Strictly through debug info, conservatively determine if the given instruction is from any of the translation units.
+ * It should be noted that this function makes the strict assumption based on name matching of the given IR files.
+*/
+fun LLVMValueRef.isUserDefined(frontend: LLVMIRLanguageFrontend) : Boolean {
+    if (LLVMHasMetadata(this) == 0) return false
+
+    // TODO: this would be better if i can figure out how to get the compilation unit <unit>
+    val bytePtr = LLVMGetDebugLocFilename(this, IntArray(255))
+//    println(bytePtr.string)
+
+    return false
 }
 
 /*
