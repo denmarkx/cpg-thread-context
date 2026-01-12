@@ -32,15 +32,22 @@ import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.findEdgeEnd
 import lving.backend.cpg.graph.getNodesWithLabel
+import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.resolveUntilHit
+import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
 
+enum class ThreadRelation {
+    BEFORE,
+    AFTER,
+    TOGETHER
+}
+
 @ExecuteLast
 class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     val illegalPaths = mutableMapOf<VariableDeclaration, MutableList<NodePath>>()
-    val routines = mutableSetOf<CallExpression>()
     val node2Threads = mutableMapOf<Node, MutableList<ThreadOperation>>()
 
     override fun cleanup() {}
@@ -70,34 +77,29 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         nodes
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
             .forEach { it as ThreadOperation
-                val threadClosurePath = it.invokes.first().resolveUntilHit(thread_closure_name, false, routines.toList())
-                val threadClosure = threadClosurePath!!.last()
-                routines.add(threadClosure)
-
                 val moved = it.arguments.first() as Reference
-                val parameter = threadClosure.invokes.first().parameters.first()
+
+                val threadClosure = it.invokes.first().resolveUntilLocal().lastOrNull() ?: return@forEach
+                val parameter = threadClosure.parameters.first()
 
                 // imagine if there was a pointer alias graph
                 // but since there's not one (yet):
 
-                // this part is insanely hacky and trusts that the intermediate calls between our canonical thread spawn
-                // and the highest ast function parent is by 2-3 levels.
-                var z = moved.getFunctionParent(nodes)?.calledBy?.first()?.getFunctionParent(nodes)?.calledBy?.first()
-                val test = z?.getFunctionParent(nodes)?.calledBy?.firstOrNull()
-                if (test?.getTrueName()?.contains("std::thread::spawn") == true) {
-                    z = test
-                }
+                val spawnCall = moved.getPriorLocalCallExpression(nodes).first()
+                val logicalMove = spawnCall.arguments.last()
 
-                val logicalMove = z?.arguments?.last()
-                val z2 = logicalMove?.followPrevDFG { x -> x is NewArrayExpression }?.nodes?.last() as NewArrayExpression? ?: return@forEach
-                val lr = z2.nextDFG.first()
-                it.threadStart = z
-                connectNodes(moved, lr, "LOGICAL_REGISTER")
+                val highestVariableInitializer = logicalMove
+                    .followPrevDFG { x -> x is NewArrayExpression }?.nodes?.last() as NewArrayExpression? ?: return@forEach
+                val highestVariable = highestVariableInitializer.nextDFG.first()
+
+                it.threadStart = spawnCall
+                connectNodes(moved, highestVariable, "LOGICAL_REGISTER")
 
                 // find the join call which should be somewhere after z.
                 // xxx: would be something that has pthread_join or waitforsingleobject&closehandle, but..........
+                // this approach would be simplified via pointer alias analysis
 
-                val handlePtr = (z.arguments.first() as Reference)
+                val handlePtr = (spawnCall.arguments.first() as Reference)
                 var handleRef : Reference? = null
                 val seen = mutableListOf<Node>()
 
@@ -124,33 +126,44 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
                 walkDFGUntilMemCpy(handlePtr.refersTo as Node)
 
-                if (handleRef == null) return@forEach
+                if (handleRef != null) {
+                    val jd = mutableListOf<CallExpression>()
 
-                val jd = mutableListOf<CallExpression>()
-
-                (handleRef.refersTo as VariableDeclaration).usages.toSet()
-                    .filter { r -> r.access == AccessValues.READ }
-                    .forEach { r ->
-                        val jp = r.followDFGEdgesUntilHit(
-                            predicate = { x -> x.astParent is CallExpression && !x.astParent!!.getTrueName().contains("memcpy") },
-                            direction = Forward(GraphToFollow.DFG),
-                        )
-                        jp.fulfilled.forEach { p ->
-                            val end = p.nodes.last().astParent
-                            if (end is CallExpression) jd.add(end)
+                    (handleRef.refersTo as VariableDeclaration).usages.toSet()
+                        .filter { r -> r.access == AccessValues.READ }
+                        .forEach { r ->
+                            val jp = r.followDFGEdgesUntilHit(
+                                predicate = { x ->
+                                    x.astParent is CallExpression && !x.astParent!!.getTrueName().contains("memcpy")
+                                },
+                                direction = Forward(GraphToFollow.DFG),
+                            )
+                            jp.fulfilled.forEach { p ->
+                                val end = p.nodes.last().astParent
+                                if (end is CallExpression) jd.add(end)
+                            }
                         }
-                    }
-
-//                if (jd.size < 2) return@forEach
-                it.threadJoin = jd[0] as CallExpression
+                    it.threadJoin = jd[0]
+                } else {
+                    // one last try:
+                    val reads = (handlePtr.refersTo as VariableDeclaration)
+                        .usages
+                        .find { r ->
+                            r != handlePtr &&
+                            r.access == AccessValues.READ
+                        } ?: return@forEach
+                    val handle = reads.nextEOG.find {
+                        n -> n is CallExpression && n.getTrueName().contains("JoinHandle") != null } ?: return@forEach
+                    it.threadJoin = handle as CallExpression
+                }
 
                 connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
                 connectNodes(it, threadClosure, "THREAD_ROUTINE")
                 addLabel(threadClosure, "LogicalThreadDeclaration")
                 moved.nextDFG.add(parameter)
                 moved.nextDFGEdges.add(Dataflow(moved, parameter))
-                node2Threads.putIfAbsent(lr, mutableListOf())
-                node2Threads[lr]?.add(it)
+                node2Threads.putIfAbsent(highestVariable, mutableListOf())
+                node2Threads[highestVariable]?.add(it)
                 return@forEach
             }
 
@@ -195,11 +208,11 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         return true
     }
 
-    fun relation(a: ThreadOperation, b: ThreadOperation) : Int {
-        if (happensBefore(a.threadJoin!!, b.threadStart!!)) return 1 // af
-        if (happensBefore(b.threadJoin!!, a.threadStart!!)) return 0 // be
-        if (startTogether(a, b)) return 2
-        return 2
+    fun relation(a: ThreadOperation, b: ThreadOperation) : ThreadRelation {
+        if (happensBefore(a.threadJoin!!, b.threadStart!!)) return ThreadRelation.AFTER
+        if (happensBefore(b.threadJoin!!, a.threadStart!!)) return ThreadRelation.BEFORE
+        if (startTogether(a, b)) return ThreadRelation.TOGETHER
+        return ThreadRelation.TOGETHER
     }
 
     fun test() {
@@ -220,6 +233,27 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
 fun Node.getFunctionParent(tuNodes: List<Node>): FunctionDeclaration? {
     return tuNodes.find { it is FunctionDeclaration && this in it.nodes} as FunctionDeclaration?
+}
+
+fun Node.getPriorLocalCallExpression(tuNodes: List<Node>): List<CallExpression> {
+    val x = mutableListOf<CallExpression>()
+    val seen = mutableListOf<Node>()
+
+    fun start(fn : FunctionDeclaration?) : Boolean {
+        if (fn == null || fn in seen) return false
+        if (getProperties(fn).getOrDefault("isLocal", "") == "true") return true
+
+        seen.add(fn)
+        fn.calledBy.forEach {
+            if (start(it.getFunctionParent(tuNodes))) {
+                x.add(it)
+            }
+        }
+        return false
+    }
+    start(this.getFunctionParent(tuNodes))
+    return x
+
 }
 
 object FilterInvokesEOG : AnalysisSensitivity() {

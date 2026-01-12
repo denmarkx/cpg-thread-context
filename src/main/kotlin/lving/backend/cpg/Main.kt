@@ -16,10 +16,10 @@ import kotlin.uuid.ExperimentalUuidApi
 
 @OptIn(ExperimentalUuidApi::class)
 fun main() {
-    val file = File("test_set/simple_thread.ll")
+    val file = File("test_set/mutex_and_thread.ll")
 
     // Optionally, we'll accept <n> .ll files which represent any external libraries.
-    val test = File("test_set/simple_thread.bc")
+    val test = File("test_set/mutex_and_thread.bc")
     externalLibraryFiles.add(test)
 
     val t1 = Demangle.demangle("_ZN3std6thread5spawn17h5c73a64a896f1bb0E")
@@ -62,6 +62,6 @@ fun main() {
         .get()
 
     handleDeferredDebugSpillNodes()
-//    result.persistGraph()
+    result.persistGraph()
 }
 

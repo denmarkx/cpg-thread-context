@@ -6,8 +6,11 @@ import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.refs
+import de.fraunhofer.aisec.cpg.graph.statements.EmptyStatement
+import de.fraunhofer.aisec.cpg.graph.statements.GotoStatement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.ProblemExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import lving.backend.cpg.language.getTrueName
@@ -153,4 +156,30 @@ fun FunctionDeclaration.resolveUntilHit(name: String, endsWith : Boolean = false
         if (candidate.size >= 2) return candidate
     }
     return listOf()
+}
+
+
+fun FunctionDeclaration.resolveUntilLocal(): List<FunctionDeclaration> {
+    val route = mutableListOf<FunctionDeclaration>()
+
+    fun traverse(current: FunctionDeclaration, visited: MutableList<Node>): Boolean {
+        if (current.nodes
+            .filter { it !is EmptyStatement && it !is ProblemExpression && it !is GotoStatement }
+            .find { getProperties(it)["isLocal"] == "true"} != null) return true
+        visited.add(current)
+        current.calls.forEach {
+            it.invokes.forEach { f ->
+                if (f !in visited) {
+                    if (traverse(f, visited)) {
+                        route.addFirst(f)
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    traverse(this, mutableListOf())
+    return route
 }

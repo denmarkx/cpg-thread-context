@@ -68,6 +68,8 @@ val dbgRecordIntrinsic = mapOf(
 */
 val externalLibraryFiles = mutableListOf<File>()
 
+val internalFiles = mutableListOf<String>()
+
 @RegisterExtraPass(CompressLLVMPass::class)
 class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRLanguageFrontend>) :
     LanguageFrontend<Pointer, LLVMTypeRef>(ctx, language) {
@@ -87,7 +89,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val obscuredFunctions = mutableListOf<LLVMValueRef>()
 
     val externalCallGraph = mutableMapOf<String, MutableSet<LLVMValueRef>>()
-    val internalFileNames = mutableListOf<String>()
 
     init { externalLibraryFiles.forEach { parseBitcode(it) } }
 
@@ -100,7 +101,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     var bindingsCache = mutableMapOf<String, Declaration>()
 
     override fun parse(file: File): TranslationUnitDeclaration {
-        internalFileNames.add(file.name)
+        internalFiles.add(file.name.split(".").first())
         var bench = Benchmark(this.javaClass, "Parsing sourcefile")
         // clear the bindings cache, because it is just valid within one module
         bindingsCache.clear()
@@ -136,6 +137,9 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
                 val match = record.find(l) ?: return@forEachIndexed
                 if (match.groupValues.isEmpty()) return@forEachIndexed
                 val groups = match.groupValues
+
+                // Temporarily unhandled
+                if (groups[1] == "dbg_value") return@forEachIndexed
 
                 val intrinsicCall = dbgRecordIntrinsic[groups[1]]
                 lines[i] = "  call void @$intrinsicCall(metadata ${groups[2]}, metadata ${groups[3]}, " +

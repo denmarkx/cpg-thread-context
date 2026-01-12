@@ -4,6 +4,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import de.fraunhofer.aisec.cpg.graph.*
+import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import org.neo4j.ogm.annotation.Relationship
@@ -28,7 +29,7 @@ class HeapOperation : CallExpression() {
     var operation : HeapOperations? = null
 
     @Relationship(value = "HEAP_DEALLOC", direction = Relationship.Direction.OUTGOING)
-    val deallocNode = mutableListOf<VariableDeclaration>()
+    val deallocNode = mutableListOf<Declaration>()
 
     /**
      * We're interested in knowing if this heap operation is within an exception handling block.
@@ -65,8 +66,8 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
             val argument = LLVMGetOperand(call, 0)
 
             val allocationName = frontend.getNameOf(argument).second
-            val decl = frontend.bindingsCache[allocationName] as VariableDeclaration
-            heapOperation.deallocNode.add(decl)
+            val decl = frontend.bindingsCache[allocationName]
+            heapOperation.deallocNode.add(decl!!)
         }
 
         return frontend.statementHandler.declarationOrNot(heapOperation, call)

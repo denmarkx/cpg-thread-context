@@ -311,7 +311,8 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
 fun Node.setLocationInfo(filename: String, line: Int) {
     setProperty(this, "filename", filename)
     setProperty(this, "line", line.toString())
-    setProperty(this, "isLocal", filename.startsWith("/rustc").toString())
+    setProperty(this, "isLocal",
+        (filename.split(".").first() in internalFiles).toString())
 }
 
 /**
@@ -340,11 +341,6 @@ fun LLVMValueRef.isFunctionUserDefined(frontend: LLVMIRLanguageFrontend) : Boole
 */
 fun LLVMValueRef.isUserDefined(frontend: LLVMIRLanguageFrontend) : Boolean {
     if (LLVMHasMetadata(this) == 0) return false
-
-    // TODO: this would be better if i can figure out how to get the compilation unit <unit>
-    val bytePtr = LLVMGetDebugLocFilename(this, IntArray(255))
-//    println(bytePtr.string)
-
     return false
 }
 

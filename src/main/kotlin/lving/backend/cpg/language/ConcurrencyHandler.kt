@@ -148,37 +148,6 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
         // There is no guarantee that the shim declaration will appear before the thread call.
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
-
-
-        LLVMGetOperand(shim, 0).print()
-        val operandName = frontend.getOperandValueAtIndex(shim, 0)
-        threadOperation.addArgument(operandName)
-
-        val t = frontend.scopeManager.lookupSymbolByName(Name(shim.name), frontend.language).first() as FunctionDeclaration
-
-        // obviously still very rust specific
-        val x = t.calls.last { it.getTrueName().startsWith("std::sys::backtrace") }
-        val y = frontend.scopeManager.lookupSymbolByName(Name(x.name.localName), frontend.language).first() as FunctionDeclaration
-
-        var local = 0
-        y.nodes.forEach {
-            if (getProperty(it, "filename")?.replaceAfterLast(".", "ll") in frontend.internalFileNames) {
-                local = 1
-                return@forEach
-            }
-        }
-
-        // TODO: if this is false, we'll have to walk through
-        threadOperation.routines.add(y)
-
-        val data = frontend.getOperandValueAtIndex(cpgCall, 1) as Reference
-        threadOperation.data.add(data)
-
-        // this is a very arbitrary way to connect the data passed in from the start thread to the new threads.
-        // it only exists because of the graph disconnection stemming from the func ptr
-        y.parameters.first().prevDFG.add(data)
-
-        return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
     }
 
     /**
