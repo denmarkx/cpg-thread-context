@@ -13,10 +13,10 @@ import de.fraunhofer.aisec.cpg.graph.HasAliases
 import de.fraunhofer.aisec.cpg.graph.Interprocedural
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.NodePath
-import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.edges.Edge
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
@@ -25,6 +25,7 @@ import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevDFG
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.parameters
+import de.fraunhofer.aisec.cpg.graph.scopes.GlobalScope
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
@@ -34,11 +35,8 @@ import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.graph.connectNodes
-import lving.backend.cpg.graph.findEdgeEnd
-import lving.backend.cpg.graph.getNodesWithLabel
 import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.isLocal
-import lving.backend.cpg.graph.resolveUntilHit
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
 import lving.backend.cpg.language.ThreadOperation
@@ -80,28 +78,52 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         nodes
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
             .forEach { it as ThreadOperation
-                val moved = it.arguments.first() as Reference
-
                 val threadClosure = it.invokes.first().resolveUntilLocal().lastOrNull() ?: return@forEach
-                val parameter = threadClosure.parameters.first()
+                addLabel(threadClosure, "LogicalThreadDeclaration")
+                it.routine = threadClosure
 
-                // imagine if there was a pointer alias graph
-                // but since there's not one (yet):
-
-                val spawnCall = moved.getPriorLocalCallExpression(nodes).first()
-                val logicalMove = spawnCall.arguments.last()
-
-                val highestVariableInitializer = logicalMove
-                    .followPrevDFG { x -> x is NewArrayExpression }?.nodes?.last() as NewArrayExpression? ?: return@forEach
-                val highestVariable = highestVariableInitializer.nextDFG.first()
-
+                // From the call expression, looking for the most recent user-called function.
+                val spawnCall = it.getPriorLocalCallExpression(nodes).first()
                 it.threadStart = spawnCall
-                connectNodes(moved, highestVariable, "LOGICAL_REGISTER")
 
+                // It's possible for the routine function to NOT have arguments IF it modifies a global variable.
+                // Knowing that, our dominating variables become the used globals. However, this becomes
+                // cumbersome to make note of since we don't know what global it's modifying.
+                val parameter = threadClosure.parameters
+                if (parameter.isEmpty()) {
+                    val variables = getGlobalVariables(threadClosure)
+                    variables.forEach { variable ->
+                        node2Threads.putIfAbsent(variable, mutableListOf())
+                        node2Threads[variable]?.add(it)
+                        it.dataParameter = variable as ValueDeclaration
+                    }
+                } else {
+                    // Things moved into threads are (usually, across most prog. langs, packed pointers)
+                    val moved = it.arguments.first() as Reference
+
+                    parameter.forEach { param ->
+                        connectNodes(moved, param, "THREAD_MOVE_VARIABLE")
+                        moved.nextDFG.add(param)
+                        moved.nextDFGEdges.add(Dataflow(moved, param))
+                    }
+                    it.dataParameter = parameter.first()
+
+                    val logicalMove = spawnCall.arguments.last()
+                    val highestVariableInitializer = logicalMove
+                        .followPrevDFG { x -> x is NewArrayExpression }?.nodes?.last() as NewArrayExpression?
+                        ?: return@forEach
+                    val highestVariable = highestVariableInitializer.nextDFG.first()
+                    connectNodes(moved, highestVariable, "LOGICAL_REGISTER")
+                    node2Threads.putIfAbsent(highestVariable, mutableListOf())
+                    node2Threads[highestVariable]?.add(it)
+                }
+
+                /*
+                 * JOIN RESOLUTION
+                */
                 // find the join call which should be somewhere after z.
                 // xxx: would be something that has pthread_join or waitforsingleobject&closehandle, but..........
                 // this approach would be simplified via pointer alias analysis
-
                 val handlePtr = (spawnCall.arguments.first() as Reference)
                 var handleRef : Reference? = null
                 val seen = mutableListOf<Node>()
@@ -159,15 +181,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                         n -> n is CallExpression && n.getTrueName().contains("JoinHandle") != null } ?: return@forEach
                     it.threadJoin = handle as CallExpression
                 }
-                connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
-                addLabel(threadClosure, "LogicalThreadDeclaration")
-
-                it.dataParameter = parameter
-                it.routine = threadClosure
-                moved.nextDFG.add(parameter)
-                moved.nextDFGEdges.add(Dataflow(moved, parameter))
-                node2Threads.putIfAbsent(highestVariable, mutableListOf())
-                node2Threads[highestVariable]?.add(it)
                 return@forEach
             }
 
@@ -229,6 +242,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 for (j in i + 1 until v.size) {
                     val b = v[j]
                     val rel = relation(b, a)
+                    println(rel)
                     if (rel == ThreadRelation.TOGETHER) {
                         group.threads.add(b)
                     }
@@ -254,27 +268,61 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         return thread.dataParameter!!.aliases.contains(candidate as HasAliases)
     }
 
+    fun getGlobalVariables(routine: FunctionDeclaration) : Set<Node> {
+        val variables = mutableSetOf<Node>()
+
+        // Specifically, we're ONLY worried about those within unaryops.
+        fun get(function: FunctionDeclaration) {
+            function.nodes
+                .filter { it is CallExpression || it is UnaryOperator}
+                .forEach {
+                    when (it) {
+                        is UnaryOperator -> {
+                            if (it.input !is Reference) return@forEach
+                            val ref = it.input as Reference
+                            if (ref.refersTo?.scope is GlobalScope) {
+                                variables.add(ref.refersTo!!)
+                            }
+                        }
+                        is CallExpression -> { get(it.invokes.first())}
+                    }
+                }
+        }
+        get(routine)
+        return variables
+    }
+
     fun test() {
         groups.forEach {
             it.threads.forEach { t ->
                 var sync = false
-                t.routine.nodes
-                    .filter { n -> (n is UnaryOperator && n.isLocal()) || n is CallExpression }
-                    .forEach {n ->
-                        when (n) {
-                            is UnaryOperator -> {
-                                if (isAliasOfThreadData(t, n) && !sync) {
-                                    println("NO SYNC ON ${n?.code}")
+                fun traverse(function: FunctionDeclaration) {
+                    function.nodes
+                        .filter { n -> (n is UnaryOperator && n.isLocal()) || n is CallExpression }
+                        .forEach { n ->
+                            when (n) {
+                                is UnaryOperator -> {
+                                    println(t)
+                                    println(n)
+                                    println("  thread data = ${t.dataParameter}")
+                                    if (isAliasOfThreadData(t, n) && !sync) {
+                                        println("NO SYNC ON ${n?.code}")
+                                    }
+                                }
+
+                                is CallExpression -> {
+                                    if (n.isLocal()) traverse(n.invokes.first())
+                                    if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
+                                    if (n.getTrueName()
+                                            .contains("core::ptr::drop_in_place<std::sync::poison::mutex::MutexGuard")
+                                    ) sync = false
                                 }
                             }
-                            is CallExpression -> {
-                                if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
-                                if (n.getTrueName().contains("core::ptr::drop_in_place<std::sync::poison::mutex::MutexGuard")) sync = false
-                            }
                         }
-                    }
                 }
+                traverse(t.routine!!)
             }
+        }
     }
 }
 

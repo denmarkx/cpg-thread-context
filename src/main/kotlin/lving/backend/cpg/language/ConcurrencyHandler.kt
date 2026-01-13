@@ -6,6 +6,7 @@ import de.fraunhofer.aisec.cpg.graph.applyMetadata
 import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.newReference
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
@@ -38,7 +39,7 @@ class ThreadOperation : CallExpression() {
     @Relationship("DATA", direction = Relationship.Direction.OUTGOING)
     val data = mutableListOf<Expression>()
 
-    var dataParameter : ParameterDeclaration? = null
+    var dataParameter : ValueDeclaration? = null
 
     @Relationship("THREAD_JOIN", direction = Relationship.Direction.OUTGOING)
     var threadJoin : CallExpression? = null
