@@ -140,6 +140,10 @@ fun getProperties(node: Node) : Map<String, String> {
     return nodeData[node]!!.propertyData
 }
 
+fun Node.isLocal() : Boolean {
+    return getProperties(this).getOrDefault("isLocal", "") == "true"
+}
+
 fun hasProperty(node: Node, property: String) : Boolean {
     return nodeData[node]?.propertyData?.containsKey(property) == true
 }

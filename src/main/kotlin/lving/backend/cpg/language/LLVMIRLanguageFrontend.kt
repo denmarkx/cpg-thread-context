@@ -281,18 +281,8 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             var useRef = LLVMGetFirstUse(function)
             while (useRef != null) {
                 val useValue = LLVMGetUser(useRef)
-                val kind = LLVMGetTypeKind(LLVMTypeOf(useValue))
 
-                // TODO: global constants, variables, values, aliases aren't handled
-                //  similarly, struct constants that are 100% global constants aren't considered global constants
-                //  and I can't figure out their classification.
-
-                // TODO: ptrtoint and inttoptr instructions segfault
-                if (
-                    ((kind == LLVMStructTypeKind) &&
-                            (useValue.opCode != LLVMCall && useValue.opCode != LLVMInvoke)) ||
-                    useValue.isGlobal() ||
-                    useValue.isPtrConversionInstr()) {
+                if (LLVMIsAInstruction(useValue) == null) {
                     useRef = LLVMGetNextUse(useRef)
                     continue
                 }

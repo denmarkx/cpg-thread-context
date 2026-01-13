@@ -9,9 +9,11 @@ import de.fraunhofer.aisec.cpg.graph.ContextSensitive
 import de.fraunhofer.aisec.cpg.graph.FilterUnreachableEOG
 import de.fraunhofer.aisec.cpg.graph.Forward
 import de.fraunhofer.aisec.cpg.graph.GraphToFollow
+import de.fraunhofer.aisec.cpg.graph.HasAliases
 import de.fraunhofer.aisec.cpg.graph.Interprocedural
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.NodePath
+import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
@@ -22,9 +24,11 @@ import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevDFG
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
@@ -33,6 +37,7 @@ import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.findEdgeEnd
 import lving.backend.cpg.graph.getNodesWithLabel
 import lving.backend.cpg.graph.getProperties
+import lving.backend.cpg.graph.isLocal
 import lving.backend.cpg.graph.resolveUntilHit
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
@@ -45,19 +50,18 @@ enum class ThreadRelation {
     TOGETHER
 }
 
+data class ThreadGroup(val node: Node, val threads: MutableSet<ThreadOperation>, val relation: ThreadRelation)
+
 @ExecuteLast
 class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     val illegalPaths = mutableMapOf<VariableDeclaration, MutableList<NodePath>>()
     val node2Threads = mutableMapOf<Node, MutableList<ThreadOperation>>()
+    val groups = mutableSetOf<ThreadGroup>()
 
     override fun cleanup() {}
 
     override fun accept(t: TranslationUnitDeclaration) {
         val nodes = SubgraphWalker.flattenAST(t)
-
-        val main = getNodesWithLabel("MainFunctionDeclaration").first()
-        val thread_closure_name = main.getTrueName() + "::{{closure}}"
-
 
         /**
          * this part shouldnt be in here, but
@@ -72,7 +76,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 it.nextDFG.add(it.refersTo as Node)
                 it.refersTo!!.prevDFG.add(it)
             }
-
 
         nodes
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
@@ -156,10 +159,11 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                         n -> n is CallExpression && n.getTrueName().contains("JoinHandle") != null } ?: return@forEach
                     it.threadJoin = handle as CallExpression
                 }
-
                 connectNodes(moved, parameter, "THREAD_MOVE_VARIABLE")
-                connectNodes(it, threadClosure, "THREAD_ROUTINE")
                 addLabel(threadClosure, "LogicalThreadDeclaration")
+
+                it.dataParameter = parameter
+                it.routine = threadClosure
                 moved.nextDFG.add(parameter)
                 moved.nextDFGEdges.add(Dataflow(moved, parameter))
                 node2Threads.putIfAbsent(highestVariable, mutableListOf())
@@ -167,6 +171,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 return@forEach
             }
 
+        assignRelationships()
         test()
     }
 
@@ -215,19 +220,61 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         return ThreadRelation.TOGETHER
     }
 
-    fun test() {
+    fun assignRelationships() {
         node2Threads.forEach { (k, v) ->
+            val group = ThreadGroup(k, mutableSetOf(), ThreadRelation.TOGETHER)
             for (i in v.indices) {
                 val a = v[i]
+                group.threads.add(a)
                 for (j in i + 1 until v.size) {
                     val b = v[j]
                     val rel = relation(b, a)
-                    println("rel(a, b) = $rel")
-                    println("\ta=${findEdgeEnd(a, "THREAD_ROUTINE")}")
-                    println("\tb=${findEdgeEnd(b, "THREAD_ROUTINE")}")
+                    if (rel == ThreadRelation.TOGETHER) {
+                        group.threads.add(b)
+                    }
                 }
             }
+            if (group.threads.size > 1) {
+                groups.add(group)
+            }
         }
+    }
+
+    fun isAliasOfThreadData(thread: ThreadOperation, node: Node) : Boolean {
+        if (thread.dataParameter == null) return false
+        var candidate = node
+        if (node is UnaryOperator) {
+            candidate = node.input
+        }
+        if (candidate !is HasAliases) return false
+        if (candidate is Reference) {
+            if (candidate.refersTo == thread.dataParameter) return true
+            return thread.dataParameter!!.aliases.contains(candidate.refersTo as HasAliases)
+        }
+        return thread.dataParameter!!.aliases.contains(candidate as HasAliases)
+    }
+
+    fun test() {
+        groups.forEach {
+            it.threads.forEach { t ->
+                var sync = false
+                t.routine.nodes
+                    .filter { n -> (n is UnaryOperator && n.isLocal()) || n is CallExpression }
+                    .forEach {n ->
+                        when (n) {
+                            is UnaryOperator -> {
+                                if (isAliasOfThreadData(t, n) && !sync) {
+                                    println("NO SYNC ON ${n?.code}")
+                                }
+                            }
+                            is CallExpression -> {
+                                if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
+                                if (n.getTrueName().contains("core::ptr::drop_in_place<std::sync::poison::mutex::MutexGuard")) sync = false
+                            }
+                        }
+                    }
+                }
+            }
     }
 }
 
