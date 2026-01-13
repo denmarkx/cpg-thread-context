@@ -177,10 +177,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         val entry = LLVMValueMetadataEntriesGetMetadata(mde, 0)
         if (entry.isNull) return
 
-        // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.
-        // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the lving.backend.cpg.main entry.
-        val dispStr = LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, entry)).string
-        if (dispStr.contains("DISPFlagMainSubprogram")) {
+        if (instr.isMainEntryPoint()) {
             addLabel(this, "MainFunctionDeclaration")
         }
 
@@ -370,4 +367,19 @@ fun LLVMMetadataRef.print() {
 */
 fun LLVMTypeRef.print() {
     println(LLVMPrintTypeToString(this).string)
+}
+
+/**
+ * Prints boolean if instruction is classified as the main entry.
+*/
+fun LLVMValueRef.isMainEntryPoint() : Boolean {
+    if (LLVMHasMetadata(this) == 0) return false
+    val mde = LLVMInstructionGetAllMetadataOtherThanDebugLoc(this, SizeTPointer(64))
+    val entry = LLVMValueMetadataEntriesGetMetadata(mde, 0)
+    if (entry == null || entry.isNull) return false
+
+    // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.
+    // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the lving.backend.cpg.main entry.
+    val dispStr = LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, entry)).string
+    return dispStr.contains("DISPFlagMainSubprogram")
 }

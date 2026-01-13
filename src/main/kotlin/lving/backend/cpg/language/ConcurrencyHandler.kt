@@ -1,25 +1,25 @@
 package lving.backend.cpg.language
 
 import de.fraunhofer.aisec.cpg.graph.MetadataProvider
-import de.fraunhofer.aisec.cpg.graph.Name
+import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.applyMetadata
-import de.fraunhofer.aisec.cpg.graph.calls
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.newReference
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.statements.LabelStatement
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
-import lving.backend.cpg.graph.getProperty
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
 
 enum class ConcurrencyOperations {
-    CREATE_THREAD
+    CREATE_THREAD,
+    MAIN_THREAD
 }
 
 enum class System {
@@ -30,7 +30,12 @@ val NativeCallMap = mapOf(
     "CreateThread" to ConcurrencyOperations.CREATE_THREAD
 )
 
-class ThreadOperation : CallExpression() {
+class MainThreadOperation : ThreadOperation() {
+    @Relationship("SCOPE", direction = Relationship.Direction.OUTGOING)
+    var nodes = mutableSetOf<Node>()
+}
+
+open class ThreadOperation : CallExpression() {
     var operation : ConcurrencyOperations? = null
 
     @Relationship("ROUTINE", direction = Relationship.Direction.OUTGOING)
@@ -47,7 +52,12 @@ class ThreadOperation : CallExpression() {
     @Relationship("THREAD_START", direction = Relationship.Direction.OUTGOING)
     var threadStart : CallExpression? = null
 
+    @Relationship("MAIN_OVERLAP", direction = Relationship.Direction.OUTGOING)
+    var mainThreadOverlap = mutableListOf<MainThreadOperation>()
 }
+
+// This won't be necessary once the logical thread start becomes resolved here instead of in a pass.
+val threadStart2Op = mutableMapOf<CallExpression, MainThreadOperation>()
 
 class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
     private val functionToOperationInfo = mutableMapOf<String, Pair<LLVMValueRef, ConcurrencyOperations>>()
@@ -56,6 +66,7 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         val operationInfo = functionToOperationInfo[function.name] ?: return null
         val statement : Statement? = when (operationInfo.second) {
             ConcurrencyOperations.CREATE_THREAD -> handleCreateThread(call, operationInfo.first, System.WINDOWS)
+            ConcurrencyOperations.MAIN_THREAD -> null
         }
         return statement
     }
@@ -152,6 +163,42 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
         // There is no guarantee that the shim declaration will appear before the thread call.
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
+    }
+
+    fun handleMainThread(function: FunctionDeclaration) {
+        // This strictly only assumes that a joinhandle call is done within the direct main scope.
+        // ..which obviously is not always the case, but it's acceptable for this initial prototype.
+
+        // another thing is this:..which obviously is rustspec, but cleansing all these things is
+        // for another time.
+        val spawnRgx = """std::thread::(\w+)?::spawn""".toRegex()
+        val joinMatch = "std::thread::JoinHandle<T>::join"
+
+        val activeThreads = mutableMapOf<String, Pair<CallExpression, MainThreadOperation>>()
+        val handleMap = mutableMapOf<String, String>()
+
+        function.nodes
+            .filter { it !is LabelStatement && it !is FunctionDeclaration && it !is Block }
+            .forEach { node ->
+                if (node is CallExpression) {
+                    val name = node.getTrueName()
+                    if (name.contains(spawnRgx)) {
+                        activeThreads[node.arguments.first().getTrueName()] = Pair(node, MainThreadOperation())
+                        return@forEach
+                    }
+                    if (name.contains("memcpy")) {
+                        handleMap[node.arguments[0].getTrueName()] = node.arguments[1].getTrueName()
+                        return@forEach
+                    }
+                    if (name == joinMatch) {
+                        val handleName = node.arguments.last().getTrueName()
+                        val call = activeThreads.remove(handleMap[handleName]) ?: return@forEach
+                        threadStart2Op[call.first] = call.second
+                        return@forEach
+                    }
+                }
+                activeThreads.forEach { op -> op.value.second.nodes.add(node) }
+            }
     }
 
     /**

@@ -171,6 +171,12 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
             bb = LLVMGetNextBasicBlock(bb)
         }
 
+
+        if (func.isMainEntryPoint()) {
+            frontend.concurrencyHandler.handleMainThread(functionDeclaration)
+        }
+
+
         frontend.scopeManager.leaveScope(functionDeclaration)
 
         return functionDeclaration

@@ -24,7 +24,6 @@ import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevDFG
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.parameters
 import de.fraunhofer.aisec.cpg.graph.scopes.GlobalScope
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
@@ -36,9 +35,9 @@ import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.getProperties
-import lving.backend.cpg.graph.isLocal
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
+import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
 
@@ -178,12 +177,11 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                             r.access == AccessValues.READ
                         } ?: return@forEach
                     val handle = reads.nextEOG.find {
-                        n -> n is CallExpression && n.getTrueName().contains("JoinHandle") != null } ?: return@forEach
+                        n -> n is CallExpression && n.getTrueName().contains("JoinHandle") } ?: return@forEach
                     it.threadJoin = handle as CallExpression
                 }
                 return@forEach
             }
-
         assignRelationships()
         test()
     }
@@ -193,7 +191,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             collectFailedPaths = false,
             findAllPossiblePaths = false,
             predicate = { it === b },
-            scope = Interprocedural(2, 1000),
+            scope = Interprocedural(2, 500),
             earlyTermination = { n, _ -> n === b },
             sensitivities = FilterUnreachableEOG + ContextSensitive + FilterInvokesEOG
         ).fulfilled.isNotEmpty()
@@ -242,7 +240,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 for (j in i + 1 until v.size) {
                     val b = v[j]
                     val rel = relation(b, a)
-                    println(rel)
                     if (rel == ThreadRelation.TOGETHER) {
                         group.threads.add(b)
                     }
@@ -280,8 +277,13 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                         is UnaryOperator -> {
                             if (it.input !is Reference) return@forEach
                             val ref = it.input as Reference
-                            if (ref.refersTo?.scope is GlobalScope) {
+                            val refersTo = ref.refersTo ?: return@forEach
+                            if (refersTo.scope is GlobalScope) {
                                 variables.add(ref.refersTo!!)
+                            } else if (refersTo is HasAliases) {
+                                variables.addAll(
+                                    (ref.refersTo as HasAliases).aliases.filter { n -> n.scope is GlobalScope } as Collection<Node>
+                                )
                             }
                         }
                         is CallExpression -> { get(it.invokes.first())}
@@ -298,20 +300,19 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 var sync = false
                 fun traverse(function: FunctionDeclaration) {
                     function.nodes
-                        .filter { n -> (n is UnaryOperator && n.isLocal()) || n is CallExpression }
+                        .filter { n -> n is UnaryOperator || (n is CallExpression && n !is LifetimeOperation) }
                         .forEach { n ->
                             when (n) {
                                 is UnaryOperator -> {
-                                    println(t)
-                                    println(n)
-                                    println("  thread data = ${t.dataParameter}")
                                     if (isAliasOfThreadData(t, n) && !sync) {
                                         println("NO SYNC ON ${n?.code}")
                                     }
                                 }
 
                                 is CallExpression -> {
-                                    if (n.isLocal()) traverse(n.invokes.first())
+                                    if (!n.getTrueName().contains("sync")) {
+                                        traverse(n.invokes.first())
+                                    }
                                     if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
                                     if (n.getTrueName()
                                             .contains("core::ptr::drop_in_place<std::sync::poison::mutex::MutexGuard")
