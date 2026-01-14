@@ -5,14 +5,15 @@ import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.applyMetadata
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.newReference
 import de.fraunhofer.aisec.cpg.graph.nodes
-import de.fraunhofer.aisec.cpg.graph.statements.LabelStatement
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
-import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.BinaryOperator
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
@@ -73,67 +74,18 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
 
     // TODO: call param here should be nativeCall
     fun handleCreateThread(cpgCall: LLVMValueRef, call: LLVMValueRef, system: System) : Statement? {
-        var entryOperand = 0
-        var dataOperand = 0
-
-        // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createthread
-        // [attributes, stack size, entry, params, flags, threadId]
-        when (system) {
-            System.WINDOWS -> {
-                entryOperand = 2
-                dataOperand = 3
-            }
-        }
-
         //  Some programming languages will pass a function pointer as a thread parameter and then an
         //  intermediate library function as the entry point. I haven't found any sort of common ground to know
         //  where the thread actually starts, especially since that function pointer is stored within a vtable.
-
         // TODO: C++ (std::thread) and Rust pass a struct { ptr data, ...} to the thread param
 
-        val entry = LLVMGetOperand(call, entryOperand)
-        val canonicalData = LLVMGetOperand(call, dataOperand)
-        val logicalData = LLVMGetOperand(cpgCall, 1)
-
-        val param = LLVMGetParam(entry, 0)
-        val paramAccess = mutableSetOf<LLVMValueRef>()
-
+        //  XXX: These notes are obsolete
         //  There currently exists an unconventional determination of this.
         //  A function (that is passed as the start routine to the thread create call) is a dispatch wrapper where:
         //      - Contains and calls an argument-derived function pointer.
         //          (Call may be direct or indirect. If indirect, unwind EOG is not followed)
         //      - The argument pointer must NOT be overridden.
         //      - All possible execution paths (besides exception handling) direct to the argument-derived func ptr.
-        var block = LLVMGetFirstBasicBlock(entry)
-        var instruction = LLVMGetFirstInstruction(block)
-
-        var canonicalThreadEntry : LLVMValueRef? = null
-        var finalVisitedList : MutableSet<LLVMValueRef>? = null
-
-        while (block != null) {
-            if (canonicalThreadEntry != null) break
-            while (instruction != null) {
-                val visited = mutableSetOf<LLVMValueRef>()
-
-                // May not call the param register directly..
-                if (isDerived(visited, param, instruction)) paramAccess.add(instruction)
-
-                if (
-                    instruction.opCode == LLVMInvoke || instruction.opCode == LLVMCall &&
-                    LLVMGetCalledValue(instruction) in paramAccess
-                    ) {
-                    canonicalThreadEntry = instruction
-                    finalVisitedList = visited
-                    break
-                }
-
-                instruction = LLVMGetNextInstruction(instruction)
-            }
-            block = LLVMGetNextBasicBlock(block)
-        }
-
-        if (canonicalThreadEntry == null) return null
-
         // The second part of this is knowing what our function pointer is referring to.
         // If we've made it this far, then we assume that the routine ARG passed to the OS call was the real thread entry.
 
@@ -143,7 +95,6 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         val vtable = LLVMGetOperand(cpgCall, 2) // LLVMGetTypeKind(LLVMGetElementType(LLVMTypeOf(... -> 13 vec
         val vtable2 = LLVMGetInitializer(vtable)
         val shim = LLVMGetAggregateElement(vtable2, 2) // funcdecl
-//        shim.isFunctionUserDefined(frontend)
 
         // for rust, shim -> some sys::backtrace call will lead us to the thread start.
         // closure may be inlined, but the direct call from backtrace would be the closure.
@@ -178,7 +129,13 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         val handleMap = mutableMapOf<String, String>()
 
         function.nodes
-            .filter { it !is LabelStatement && it !is FunctionDeclaration && it !is Block }
+            .filter {
+                    (it is Reference ||
+                    it is UnaryOperator ||
+                    it is CallExpression ||
+                    it is BinaryOperator) &&
+                    (it !is LifetimeOperation)
+            }
             .forEach { node ->
                 if (node is CallExpression) {
                     val name = node.getTrueName()
@@ -194,11 +151,42 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
                         val handleName = node.arguments.last().getTrueName()
                         val call = activeThreads.remove(handleMap[handleName]) ?: return@forEach
                         threadStart2Op[call.first] = call.second
+                        frontend.currentTU?.statements?.add(call.second)
                         return@forEach
                     }
                 }
-                activeThreads.forEach { op -> op.value.second.nodes.add(node) }
+
+                activeThreads.forEach { op ->
+                    val list = op.value.second.nodes
+                    val x = when (node) {
+                        is Reference -> getReferenceTo(node)
+                        is UnaryOperator -> getReferenceTo(node.input)
+                        is CallExpression -> {
+                            node.arguments.forEach { arg ->
+                                val refersTo = getReferenceTo(arg) ?: return@forEach
+                                list.add(refersTo)
+                            }
+                            null
+                        }
+                        is BinaryOperator -> {
+                            val lhs = getReferenceTo(node.lhs) ?: return@forEach
+                            list.add(lhs)
+
+                            val rhs = getReferenceTo(node.rhs) ?: return@forEach
+                            list.add(rhs)
+                            null
+                        }
+                        else -> null
+                    } ?: return@forEach
+                    list.add(x)
+                }
             }
+    }
+
+    private fun getReferenceTo(reference: Node) : Node? {
+        if (reference !is Reference) return null
+        val refersTo = reference.refersTo ?: return null
+        return refersTo
     }
 
     /**

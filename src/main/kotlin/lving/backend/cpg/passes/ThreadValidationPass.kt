@@ -38,8 +38,12 @@ import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
 import lving.backend.cpg.language.LifetimeOperation
+import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
+import lving.backend.cpg.language.isDropOperation
+import lving.backend.cpg.language.threadStart2Op
+import org.neo4j.driver.Value
 
 enum class ThreadRelation {
     BEFORE,
@@ -182,8 +186,38 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
                 return@forEach
             }
+
+        val threadOps = nodes.filterIsInstance<ThreadOperation>()
+        threadStart2Op.forEach {
+            val threadOp = threadOps.find { t -> t.threadStart == it.key } ?: return@forEach
+            handleMainOperation(threadOp, it.value)
+        }
+
         assignRelationships()
         test()
+    }
+
+    /**
+     * Determines if any of operation's nodes is an alias of threadCall's data.
+    */
+    fun handleMainOperation(thread: ThreadOperation, operation: MainThreadOperation) {
+        val data = thread.data.firstOrNull() ?: return
+        if (data !is Reference) return
+
+        val variable = data.refersTo
+        if (variable !is HasAliases) return
+        val aliases = (variable as HasAliases).aliases
+
+        val intersection = aliases.intersect(operation.nodes)
+        if (intersection.isNotEmpty()) {
+            thread.mainThreadOverlap.add(operation)
+        }
+
+        val group = ThreadGroup(
+            thread.dataParameter as Node,
+            mutableSetOf(thread, operation),
+            ThreadRelation.TOGETHER)
+        groups.add(group)
     }
 
     fun happensBefore(a: Node, b: Node): Boolean =
@@ -191,7 +225,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             collectFailedPaths = false,
             findAllPossiblePaths = false,
             predicate = { it === b },
-            scope = Interprocedural(2, 500),
+            scope = Interprocedural(2, 150),
             earlyTermination = { n, _ -> n === b },
             sensitivities = FilterUnreachableEOG + ContextSensitive + FilterInvokesEOG
         ).fulfilled.isNotEmpty()
@@ -298,8 +332,8 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         groups.forEach {
             it.threads.forEach { t ->
                 var sync = false
-                fun traverse(function: FunctionDeclaration) {
-                    function.nodes
+                fun traverse(nodes: List<Node>) {
+                    nodes
                         .filter { n -> n is UnaryOperator || (n is CallExpression && n !is LifetimeOperation) }
                         .forEach { n ->
                             when (n) {
@@ -311,7 +345,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
                                 is CallExpression -> {
                                     if (!n.getTrueName().contains("sync")) {
-                                        traverse(n.invokes.first())
+                                        traverse(n.invokes.first().nodes)
                                     }
                                     if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
                                     if (n.getTrueName()
@@ -321,7 +355,11 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                             }
                         }
                 }
-                traverse(t.routine!!)
+                if (t.routine == null && t is MainThreadOperation) {
+                    traverse(t.nodes.toList())
+                } else {
+                    traverse(t.routine.nodes)
+                }
             }
         }
     }
