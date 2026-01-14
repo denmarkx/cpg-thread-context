@@ -34,6 +34,8 @@ import java.util.HashSet
 @DependsOn(DFGPass::class)
 @ExecuteBefore(ThreadValidationPass::class)
 class BasicAliasResolverPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
+    private val uf = SimpleUF()
+
     override fun cleanup() {}
 
     override fun accept(t: TranslationUnitDeclaration) {
@@ -81,35 +83,71 @@ class BasicAliasResolverPass(ctx: TranslationContext) : TranslationUnitPass(ctx)
     }
 
     fun addAlias(parent: HasAliases, alias: HasAliases) {
-        if (alias is Reference && alias !is MemberExpression) {
-            parent.aliases.add(alias.refersTo as HasAliases)
-            return
-        }
-        parent.aliases.add(alias)
-    }
-
-    fun getAliases(node: HasAliases) : Set<HasAliases> {
-        val seen = mutableSetOf<HasAliases>()
-        val stack = ArrayDeque<HasAliases>()
-        stack.add(node)
-        while (stack.isNotEmpty()) {
-            val c = stack.removeLast()
-            if (!seen.add(c)) continue
-            stack.addAll(c.aliases)
-        }
-        return seen
+        val refersTo = if (alias is Reference && alias !is MemberExpression) {
+            alias.refersTo as HasAliases
+        } else alias
+        uf.union(parent, refersTo)
     }
 
     fun resolveAliases(nodes: List<HasAliases>) {
-        val seen = HashSet<HasAliases>()
-        nodes.forEach {
-            if (it in seen || it.aliases.isEmpty()) return@forEach
-            val aliases = getAliases(it)
-            seen.addAll(aliases)
-            aliases.forEach { n ->
-                n.aliases = (aliases - n).toMutableSet()
+        val groups = uf.getGroups()
+        for (grp in groups.values) {
+            for (n in grp) {
+                n.aliases = (grp - n).toMutableSet()
             }
         }
     }
 
+}
+
+class SimpleUF {
+    private val lookup = mutableMapOf<HasAliases, HasAliases>()
+    private val rank = mutableMapOf<HasAliases, Int>()
+
+    fun new(x: HasAliases) {
+        if (x !in lookup) {
+            lookup[x] = x
+            rank[x] = 0
+        }
+    }
+
+    fun find(x: HasAliases): HasAliases {
+        new(x)
+
+        var curr = x
+        while (lookup[curr] != curr) {
+            val n = lookup[curr]!!
+            val gp = lookup[n]!!
+            lookup[curr] = gp
+            curr = gp
+        }
+        return curr
+    }
+
+    fun union(x: HasAliases, y: HasAliases) {
+        val lookX = find(x)
+        val lookY = find(y)
+        if (lookX == lookY) return
+
+        val rankX = rank[lookX]!!
+        val rankY = rank[lookY]!!
+
+        when {
+            rankX < rankY -> lookup[lookX] = lookY
+            rankX > rankY -> lookup[lookY] = lookX
+            else -> {
+                lookup[lookY] = lookX
+                rank[lookX] = rankX + 1
+            }
+        }
+    }
+
+    fun getGroups(): Map<HasAliases, MutableSet<HasAliases>> {
+        val retval = mutableMapOf<HasAliases, MutableSet<HasAliases>>()
+        lookup.keys.forEach {
+            val root = find(it)
+            retval.computeIfAbsent(root) { mutableSetOf() }.add(it)
+        }
+        return retval
+    }
 }
