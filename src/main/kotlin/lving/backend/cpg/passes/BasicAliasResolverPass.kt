@@ -14,6 +14,7 @@ import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.refs
 import de.fraunhofer.aisec.cpg.graph.statements.ReturnStatement
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.MemberExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.SubscriptExpression
@@ -24,6 +25,7 @@ import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
 import de.fraunhofer.aisec.cpg.passes.configuration.DependsOn
 import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteBefore
+import java.util.HashSet
 
 /**
  * An extremely basic (and flow insensitive) alias resolver based on known patterns.
@@ -99,7 +101,7 @@ class BasicAliasResolverPass(ctx: TranslationContext) : TranslationUnitPass(ctx)
     }
 
     fun resolveAliases(nodes: List<HasAliases>) {
-        val seen = mutableSetOf<HasAliases>()
+        val seen = HashSet<HasAliases>()
         nodes.forEach {
             if (it in seen || it.aliases.isEmpty()) return@forEach
             val aliases = getAliases(it)
