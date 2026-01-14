@@ -6,11 +6,9 @@ import org.bytedeco.llvm.global.LLVM.*
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import lving.backend.cpg.graph.addLabel
-import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.setProperty
 import org.bytedeco.llvm.LLVM.LLVMAttributeRef
 import org.neo4j.ogm.annotation.Relationship
@@ -45,13 +43,14 @@ private val MemoryIntrinsics = listOf(
     "llvm.memcpy.p0.p0.i64"
 )
 
+
+/** Functions within here explicitly are described as heap functions ONLY if it can be determined
+ * that the behavior performs the heap operation described and nothing else.
+*/
+val heapFunctions = mutableMapOf<String, HeapOperations>()
+
 class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
     private val heapDispatchCandidates = mutableMapOf<LLVMValueRef, HeapOperation>()
-
-    /** Functions within here explicitly are described as heap functions ONLY if it can be determined
-     * that the behavior performs the heap operation described and nothing else.
-    */
-    private val heapFunctions = mutableMapOf<String, HeapOperations>()
 
     fun handle(call: LLVMValueRef, function: LLVMValueRef) : Statement? {
         // The parent of this function is classified as a heap operation IF
@@ -106,6 +105,7 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
     */
     private fun isDeallocationWrapper(instr: LLVMValueRef, operation: HeapOperation): Boolean {
         if (LLVMIsAFunction(instr) == null) return false
+        if (instr.name in heapFunctions) return true
 
         val returnType = LLVMGetTypeKind(LLVMGetReturnType(LLVMGetGEPSourceElementType(instr)))
 
@@ -126,7 +126,7 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
                 val index = (call as CallExpression).arguments
                     .filterIsInstance<Reference>()
                     .indexOfFirst { r -> (r as Reference).refersTo == objectParam }
-                if (index == -1) continue
+                if (index == -1) return false
 
                 // NOTE: This assumes that any function interacting with the object
                 // takes it directly without going through intermediate registers.
