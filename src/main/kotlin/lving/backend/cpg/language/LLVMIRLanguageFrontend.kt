@@ -32,6 +32,7 @@ import de.fraunhofer.aisec.cpg.frontends.TranslationException
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.graph.types.*
@@ -42,9 +43,11 @@ import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import de.fraunhofer.aisec.cpg.passes.configuration.RegisterExtraPass
 import de.fraunhofer.aisec.cpg.sarif.PhysicalLocation
 import org.bytedeco.javacpp.BytePointer
+import org.bytedeco.javacpp.IntPointer
 import java.io.File
 import java.nio.ByteBuffer
 import org.bytedeco.javacpp.Pointer
+import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
 import java.io.FileReader
@@ -85,12 +88,27 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val typeCache = mutableMapOf<String, Type>()
     val phiList = mutableListOf<LLVMValueRef>()
 
+    /**
+     Function -> Calls (both as LLVMValueRefs)
+     NOTE: It is considered unsafe to refer to this beyond the initial CPG creation.
+     There is no guarantee that these pointers are valid from within passes.
+    */
+    val internalCallHierarchy = mutableMapOf<LLVMValueRef, MutableSet<LLVMValueRef>>()
+
     /** Some functions within our non-lto IR may contain only the function signature. */
     val obscuredFunctions = mutableListOf<LLVMValueRef>()
 
     val externalCallGraph = mutableMapOf<String, MutableSet<LLVMValueRef>>()
 
     init { externalLibraryFiles.forEach { parseBitcode(it) } }
+
+    /**
+     * Binding between LLVMValueRef and its corresponding declaration.
+     * NOTE: It is unsafe to refer to this after the LLVM context has been discarded.
+    */
+    val inverseBindingsCache = mutableMapOf<Declaration, LLVMValueRef>()
+
+    val callsCache = mutableMapOf<LLVMValueRef, CallExpression>()
 
     /**
      * This contains a cache binding between an LLVMValueRef (representing a variable) and its
@@ -238,6 +256,8 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             statementHandler.handlePhi(phiInstr, tu, flatAST)
             counter++
         }
+
+        heapLifetimeHandler.postResolution()
 
         LLVMContextDispose(ctxRef)
         bench.addMeasurement()
@@ -476,4 +496,51 @@ fun LLVMValueRef.isPtrConversionInstr(): Boolean {
         LLVMIsAIntToPtrInst(this),
     )
     return candidate.any { it != null }
+}
+
+/**
+ * Returns the function parent of the instruction, if applicable.
+*/
+fun LLVMValueRef.getFunctionParent() : LLVMValueRef? {
+    if (LLVMIsAInstruction(this) == null) return null
+    val block = LLVMGetInstructionParent(this) ?: return null
+    return LLVMGetBasicBlockParent(block) ?: return null
+}
+
+/**
+ * Returns a list of function attributes.
+*/
+
+data class Attributes(
+    val enumAttributes: List<Int>,
+    val strAttributes: List<String>,
+    val typeAttributes: List<String>,
+)
+
+fun LLVMValueRef.getAttributes(id: Int) : Attributes? {
+    val attributeCount = LLVMGetAttributeCountAtIndex(this, id)
+    if (attributeCount == 0) return null
+
+    val attributesPtr = PointerPointer<LLVMAttributeRef>(
+        (Pointer.sizeof(LLVMAttributeRef::class.java) * attributeCount).toLong()
+    )
+    for (i in 0..<attributeCount) { attributesPtr.put(LLVMAttributeRef()) }
+    LLVMGetAttributesAtIndex(this, id, attributesPtr)
+
+    val enumAttributes = mutableListOf<Int>()
+    val stringAttributes = mutableListOf<String>()
+    val typeAttributes = mutableListOf<String>()
+
+    for (i in 0..<attributeCount) {
+        val attr = attributesPtr.get(LLVMAttributeRef::class.java, i.toLong())
+        when (1) {
+            LLVMIsEnumAttribute(attr) -> enumAttributes.add(LLVMGetEnumAttributeKind(attr))
+            LLVMIsStringAttribute(attr) -> stringAttributes.add(
+                LLVMGetStringAttributeValue(attr, IntPointer(255)).string)
+            LLVMIsTypeAttribute(attr) -> typeAttributes.add(
+                LLVMGetStringAttributeValue(attr, IntPointer(255)).string)
+        }
+    }
+
+    return Attributes(enumAttributes, stringAttributes, typeAttributes)
 }

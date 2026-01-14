@@ -63,6 +63,7 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
             }
         }
         declaration?.applyMetadataExt(value, frontend)
+        if (declaration != null) frontend.inverseBindingsCache[declaration] = value
         return declaration
     }
 
@@ -131,6 +132,8 @@ class DeclarationHandler(lang: LLVMIRLanguageFrontend) :
 
             param = LLVMGetNextParam(param)
         }
+
+        frontend.bindingsCache[name.string]= functionDeclaration
 
         var bb = LLVMGetFirstBasicBlock(func)
         while (bb != null) {

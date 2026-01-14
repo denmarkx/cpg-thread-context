@@ -1142,6 +1142,9 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         val calledFunc = LLVMGetCalledValue(instr)
         var calledFuncName: CharSequence = LLVMGetValueName(calledFunc).string
 
+        frontend.internalCallHierarchy.putIfAbsent(calledFunc, mutableSetOf())
+        frontend.internalCallHierarchy[calledFunc]?.add(instr)
+
         // Intrinsics are handled elsewhere:
         if (calledFuncName.startsWith("llvm")) {
             val statement = frontend.intrinsicHandler.handle(instr)
@@ -1160,9 +1163,9 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
         }
 
         // We intercede the currently created call expression if it contains any sort of alloctype
-//        if (frontend.heapLifetimeHandler.isLifetimeCall(calledFunc)) {
-//            return frontend.heapLifetimeHandler.handle(instr, calledFunc)
-//        }
+        if (frontend.heapLifetimeHandler.isLifetimeCall(calledFunc)) {
+            return frontend.heapLifetimeHandler.handle(instr, calledFunc)
+        }
 
         if (frontend.concurrencyHandler.isConcurrencyCall(calledFunc)) {
             return frontend.concurrencyHandler.handle(instr, calledFunc)
@@ -1256,6 +1259,8 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
             return tryStatement
         }
+
+        frontend.callsCache[instr] = callExpr
 
         return declarationOrNot(callExpr, instr)
     }

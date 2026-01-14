@@ -5,8 +5,13 @@ import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import lving.backend.cpg.graph.addLabel
+import lving.backend.cpg.graph.getProperties
+import lving.backend.cpg.graph.setProperty
 import org.bytedeco.llvm.LLVM.LLVMAttributeRef
 import org.neo4j.ogm.annotation.Relationship
 
@@ -35,33 +40,44 @@ class HeapOperation : CallExpression() {
     override var name : Name = Name("")
 }
 
+private val MemoryIntrinsics = listOf(
+    "llvm.memset.p0.i64",
+    "llvm.memcpy.p0.p0.i64"
+)
+
 class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
+    private val heapDispatchCandidates = mutableMapOf<LLVMValueRef, HeapOperation>()
+
+    /** Functions within here explicitly are described as heap functions ONLY if it can be determined
+     * that the behavior performs the heap operation described and nothing else.
+    */
+    private val heapFunctions = mutableMapOf<String, HeapOperations>()
 
     fun handle(call: LLVMValueRef, function: LLVMValueRef) : Statement? {
+        // The parent of this function is classified as a heap operation IF
+        // it does nothing else besides call the native call (excluding catch resolutions)
+        // However, since there is a possibility of ordering offsets, this is delegated to after
+        // CPG creation, but before finalization (which is before pass handling).
+        val parent = LLVMGetBasicBlockParent(LLVMGetInstructionParent(call))
+
         // See isLifetimeCall for info about this:
         val attribute : LLVMAttributeRef? = attributeCache[function]?.find {
             LLVMIsEnumAttribute(it) > 0 &&
             LLVMGetEnumAttributeKind(it) == LLVMAttributeAllocaKind
-        }
+        } ?: return null
 
         var operationKind: HeapOperations?
-        if (attribute != null) {
-            val attrValue = LLVMGetEnumAttributeValue(attribute)
-            operationKind = when {
-                (attrValue and LLVMAllocFnKindAlloc) >= 1L -> HeapOperations.ALLOC
-                (attrValue and LLVMAllocFnKindRealloc) >= 1L -> HeapOperations.REALLOC
-                (attrValue and LLVMAllocFnKindFree) >= 1L -> HeapOperations.FREE
-                else -> null
-            }
-        } else if (function.name.contains("drop_in_place")) {
-            operationKind = HeapOperations.FREE
-        } else return null
-
+        val attrValue = LLVMGetEnumAttributeValue(attribute)
+        operationKind = when {
+            (attrValue and LLVMAllocFnKindAlloc) >= 1L -> HeapOperations.ALLOC
+            (attrValue and LLVMAllocFnKindRealloc) >= 1L -> HeapOperations.REALLOC
+            (attrValue and LLVMAllocFnKindFree) >= 1L -> HeapOperations.FREE
+            else -> null
+        }
 
         val heapOperation = HeapOperation()
-        heapOperation.applyMetadata(this)
+        heapOperation.applyMetadata(frontend, call.name, call)
         heapOperation.operation = operationKind
-        heapOperation.name = Name(heapOperation.operation.toString())
 
         // free(ptr, {size..}):
         if (heapOperation.operation == HeapOperations.FREE) {
@@ -72,17 +88,93 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
             heapOperation.deallocNode.add(decl!!)
         }
 
+        heapDispatchCandidates[parent] = heapOperation
+        heapFunctions[parent.name] = operationKind!!
+
         return frontend.statementHandler.declarationOrNot(heapOperation, call)
+    }
+
+    /**
+     * Function F is a deallocator wrapper IF:
+     *  - F does not allocate new heap memory
+     *  - F does not retain or return heap pointers
+     *  - All heap effects of F are free effects.
+     *  - All non-free effects are stack-local or argument-local.
+     *
+     * Function G (a subset of F) is considered irrelevant IF:
+     *  - G does not capture the object being freed by F.
+    */
+    private fun isDeallocationWrapper(instr: LLVMValueRef, operation: HeapOperation): Boolean {
+        if (LLVMIsAFunction(instr) == null) return false
+
+        val returnType = LLVMGetTypeKind(LLVMGetReturnType(LLVMGetGEPSourceElementType(instr)))
+
+        // Usually, you wouldn't really ever expect a free or dispatch free func to ret something.
+        if (returnType != LLVMVoidTypeKind) return false
+        if (LLVMCountParams(instr) == 0) return false
+
+        val function = frontend.bindingsCache[instr.name] ?: return false
+        val objectParam = function.parameters.first()
+
+        for (call in function.nodes.filter { it is CallExpression && it !is LifetimeOperation}) {
+            val heapCandidate = heapFunctions[call.name.localName]
+            if (heapCandidate == null) {
+                // I will say that having any sort of these functions within a non-low-level drop call
+                // would be unorthodox.
+                if (call.name.localName in MemoryIntrinsics) return false
+
+                val index = (call as CallExpression).arguments
+                    .filterIsInstance<Reference>()
+                    .indexOfFirst { r -> (r as Reference).refersTo == objectParam }
+                if (index == -1) continue
+
+                // NOTE: This assumes that any function interacting with the object
+                // takes it directly without going through intermediate registers.
+                val callee = frontend.bindingsCache[call.name.localName] ?: continue
+                val calleeInstr = frontend.inverseBindingsCache[callee] ?: continue
+                val attributes = calleeInstr.getAttributes(index + 1) ?: continue
+                if (!attributes.enumAttributes.containsAll(listOf(NO_CAPTURE))) return false
+
+            } else if (heapCandidate != HeapOperations.FREE) {
+                // A heap call that is probably realloc or alloc.. not a wrapper!
+                return false
+            }
+        }
+        heapFunctions[instr.name] = HeapOperations.FREE
+        return true
+    }
+
+    private fun replaceAllCalls(function: LLVMValueRef, operation: HeapOperations) {
+        val seen = HashSet<LLVMValueRef>()
+        frontend.internalCallHierarchy[function]?.forEach {
+            if (it in seen) return@forEach
+            seen.add(it)
+            val call = frontend.callsCache[it] ?: return@forEach
+            addLabel(call, "HeapOperation")
+            setProperty(call, "operation", operation.toString())
+        }
+    }
+
+    fun postResolution() {
+        fun traverse(parent: LLVMValueRef, operation: HeapOperation) {
+            if (operation.operation == HeapOperations.FREE) {
+                if (!isDeallocationWrapper(parent, operation)) return
+                val function = frontend.bindingsCache[parent.name] ?: return
+                if (function is FunctionDeclaration) replaceAllCalls(parent, HeapOperations.FREE)
+            }
+            frontend.internalCallHierarchy[parent]?.forEach {
+                traverse(it.getFunctionParent()!!, operation)
+            }
+        }
+
+        for ((candidate, operation) in heapDispatchCandidates) {
+            traverse(candidate, operation)
+        }
     }
 
     fun isLifetimeCall(function: LLVMValueRef) : Boolean {
         // TODO: LLVMIsAFunction -> false for function pointers.
         if (LLVMIsAFunction(function) == null) return false
-
-        // RUSTSPEC: core::ptr::drop_in_place<T> will (at some point) lead to __rust_dealloc.
-        // which is tagged with a function attribute of allockind(...). Though I'm not
-        // interested in making more traversal hacks until we have a proper flow in the future.
-        if (function.name.contains("drop_in_place")) return true
 
         // The function itself may not have been parsed yet. MetadataExt keeps a lookup table
         // meaning if we parse attributes for a function here, we don't have to do that again later.
@@ -94,4 +186,3 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
         } != null
     }
 }
-

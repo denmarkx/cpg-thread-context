@@ -37,6 +37,10 @@ import java.util.IdentityHashMap
 var deferredDebugSpill = Collections.synchronizedMap<ValueDeclaration, List<String>>(IdentityHashMap())
 var attributeCache = mutableMapOf<LLVMValueRef, MutableList<LLVMAttributeRef>>()
 
+// Attributes
+const val NO_CAPTURE = 25
+const val READ_ONLY = 52
+
 /*
 * When Node.applyMetadataExt is called, the <x>.dbg.spill reference
 * has no edges. This is because all the other passes haven't yet been run.
