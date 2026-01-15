@@ -1,7 +1,6 @@
 package lving.backend.cpg.passes
 
 import de.fraunhofer.aisec.cpg.TranslationContext
-import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.AnalysisDirection
 import de.fraunhofer.aisec.cpg.graph.AnalysisSensitivity
 import de.fraunhofer.aisec.cpg.graph.Context
@@ -11,16 +10,15 @@ import de.fraunhofer.aisec.cpg.graph.Forward
 import de.fraunhofer.aisec.cpg.graph.GraphToFollow
 import de.fraunhofer.aisec.cpg.graph.HasAliases
 import de.fraunhofer.aisec.cpg.graph.Interprocedural
+import de.fraunhofer.aisec.cpg.graph.Intraprocedural
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.NodePath
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
 import de.fraunhofer.aisec.cpg.graph.edges.Edge
 import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
-import de.fraunhofer.aisec.cpg.graph.followDFGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevDFG
 import de.fraunhofer.aisec.cpg.graph.nodes
@@ -63,20 +61,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
     override fun accept(t: TranslationUnitDeclaration) {
         val nodes = SubgraphWalker.flattenAST(t)
-
-        /**
-         * this part shouldnt be in here, but
-         * where edge.start is a write reference and edge is a REFERS_TO,
-         * follow refers_to even though a proper DFG edge may not exist.
-         *
-         * it is currently under review as to why this DFG edge doesnt exist.
-        */
-        nodes
-            .filter { it is Reference && it.access == AccessValues.WRITE && it.refersTo != null && !it.nextDFG.contains(it.refersTo as Node) }
-            .forEach { it as Reference
-                it.nextDFG.add(it.refersTo as Node)
-                it.refersTo!!.prevDFG.add(it)
-            }
 
         nodes
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
@@ -126,65 +110,25 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 */
                 // find the join call which should be somewhere after z.
                 // xxx: would be something that has pthread_join or waitforsingleobject&closehandle, but..........
-                // this approach would be simplified via pointer alias analysis
                 val handlePtr = (spawnCall.arguments.first() as Reference)
-                var handleRef : Reference? = null
-                val seen = mutableListOf<Node>()
+                val handleDecl = handlePtr.refersTo as? HasAliases ?: return@forEach
 
-                fun walkDFGUntilMemCpy(n: Node) {
-                    if (n in seen || n is ParameterDeclaration) return
-                    seen.add(n)
-                    if (n is VariableDeclaration) {
-                        n.usages.toSet().filter { r -> r != handlePtr}
-                            .forEach { r -> walkDFGUntilMemCpy(r) }
-                        return
-                    }
-                    if (n is Reference) {
-                        if (n.access == AccessValues.WRITE) {
-                            if (n.prevEOG.find { e -> e.getTrueName().contains("llvm.memcpy") } != null) {
-                                handleRef = n
-                                return
-                            }
-                        } else {
-                            n.nextDFG.forEach { a -> walkDFGUntilMemCpy(a) }
-                            return
+                val path = handlePtr.followEOGEdgesUntilHit(
+                    predicate = { x ->
+                        x is CallExpression &&
+                        x.getTrueName().contains("JoinHandle") &&
+                        x.arguments.any {
+                            a -> a is Reference && (a.refersTo as? HasAliases in handleDecl.aliases)
                         }
-                    }
-                    n.prevDFG.forEach { a -> walkDFGUntilMemCpy(a) }
-                }
-                walkDFGUntilMemCpy(handlePtr.refersTo as Node)
+                    },
+                    collectFailedPaths = false,
+                    scope = Intraprocedural(100),
+                    direction = Forward(GraphToFollow.EOG),
+                ).fulfilled
 
-                if (handleRef != null) {
-                    val jd = mutableListOf<CallExpression>()
-
-                    (handleRef.refersTo as VariableDeclaration).usages.toSet()
-                        .filter { r -> r.access == AccessValues.READ }
-                        .forEach { r ->
-                            val jp = r.followDFGEdgesUntilHit(
-                                predicate = { x ->
-                                    x.astParent is CallExpression && !x.astParent!!.getTrueName().contains("memcpy")
-                                },
-                                direction = Forward(GraphToFollow.DFG),
-                            )
-                            jp.fulfilled.forEach { p ->
-                                val end = p.nodes.last().astParent
-                                if (end is CallExpression) jd.add(end)
-                            }
-                        }
-                    it.threadJoin = jd[0]
-                } else {
-                    // one last try:
-                    val reads = (handlePtr.refersTo as VariableDeclaration)
-                        .usages
-                        .find { r ->
-                            r != handlePtr &&
-                            r.access == AccessValues.READ
-                        } ?: return@forEach
-                    val handle = reads.nextEOG.find {
-                        n -> n is CallExpression && n.getTrueName().contains("JoinHandle") } ?: return@forEach
-                    it.threadJoin = handle as CallExpression
-                }
-                return@forEach
+                if (path.isEmpty()) return@forEach
+                val joinCall = path.first().nodes.last()
+                it.threadJoin = joinCall as CallExpression
             }
 
         val threadOps = nodes.filterIsInstance<ThreadOperation>()
