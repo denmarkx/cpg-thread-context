@@ -28,6 +28,7 @@ import de.fraunhofer.aisec.cpg.graph.scopes.GlobalScope
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.SubscriptExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.passes.TranslationUnitPass
@@ -41,9 +42,8 @@ import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
-import lving.backend.cpg.language.isDropOperation
+import lving.backend.cpg.language.heapFunctions
 import lving.backend.cpg.language.threadStart2Op
-import org.neo4j.driver.Value
 
 enum class ThreadRelation {
     BEFORE,
@@ -290,6 +290,11 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         var candidate = node
         if (node is UnaryOperator) {
             candidate = node.input
+
+            // input may be a subscript (gep), we need to do an extra move if so:
+            if (candidate is SubscriptExpression) {
+                candidate = candidate.arrayExpression
+            }
         }
         if (candidate !is HasAliases) return false
         if (candidate is Reference) {
@@ -329,23 +334,36 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     }
 
     fun test() {
+        val f = mutableSetOf<String>()
         groups.forEach {
             it.threads.forEach { t ->
                 var sync = false
-                fun traverse(nodes: List<Node>) {
-                    nodes
-                        .filter { n -> n is UnaryOperator || (n is CallExpression && n !is LifetimeOperation) }
-                        .forEach { n ->
+                fun traverse(nodes: List<Node>, parent: String) {
+                    val noSyncUnaryOps = mutableSetOf<UnaryOperator>()
+                    val operations = nodes
+                        .filter { n ->
+                            n is UnaryOperator ||
+                            (n is CallExpression && (
+                                n !is LifetimeOperation) &&
+                                // HeapOperations don't replace the actual call expression (this is a bit of an irregularity right now)
+                                (n.name.localName !in heapFunctions)
+                            )
+                        }
+                    operations.forEach { n ->
                             when (n) {
                                 is UnaryOperator -> {
                                     if (isAliasOfThreadData(t, n) && !sync) {
-                                        println("NO SYNC ON ${n?.code}")
+//                                        println("NO SYNC ON ${n?.code}")
+                                        noSyncUnaryOps.add(n)
+                                    } else {
+                                        println("OK: ${n?.code}")
+                                        println(n)
                                     }
                                 }
 
                                 is CallExpression -> {
                                     if (!n.getTrueName().contains("sync")) {
-                                        traverse(n.invokes.first().nodes)
+                                        traverse(n.invokes.first().nodes, n.invokes.first().getTrueName())
                                     }
                                     if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
                                     if (n.getTrueName()
@@ -354,14 +372,20 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                                 }
                             }
                         }
+
+                    val allUnaryOps = operations.filter { n -> n is UnaryOperator}
+                    if (allUnaryOps.size == noSyncUnaryOps.size && noSyncUnaryOps.isNotEmpty()) {
+                        f.add(parent)
+                    }
                 }
                 if (t.routine == null && t is MainThreadOperation) {
-                    traverse(t.nodes.toList())
+                    traverse(t.nodes.toList(), "MAIN")
                 } else {
-                    traverse(t.routine.nodes)
+                    traverse(t.routine.nodes, "ROUTINE")
                 }
             }
         }
+        println(f)
     }
 }
 
