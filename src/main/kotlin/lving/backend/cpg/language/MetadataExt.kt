@@ -291,9 +291,6 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
                                 k.split(".dbg.spill")[0] == bytePtr.string
                             }
                             if (match.isNullOrEmpty()) break
-
-                            // since the call to the actual closure func isnt done yet, this is deferred.
-                            deferClosure(reference, match.values.first())
                         }
                     }
                     break

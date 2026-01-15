@@ -1214,9 +1214,6 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
                 (operandName as Reference).access = AccessValues.WRITE
             }
 
-            if (callFuncNameDemangled.trim().endsWith("{{closure}}")) {
-                handleClosureCandidate(operandName as Reference)
-            }
             idx++
         }
         callExpr.applyMetadataExt(instr, frontend)
