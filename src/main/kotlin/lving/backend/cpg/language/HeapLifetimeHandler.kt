@@ -6,11 +6,16 @@ import org.bytedeco.llvm.global.LLVM.*
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.VariableDeclaration
+import de.fraunhofer.aisec.cpg.graph.statements.EmptyStatement
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import lving.backend.cpg.graph.addLabel
+import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.setProperty
+import lving.backend.cpg.passes.getFunctionParent
 import org.bytedeco.llvm.LLVM.LLVMAttributeRef
 import org.neo4j.ogm.annotation.Relationship
 
@@ -49,6 +54,12 @@ private val MemoryIntrinsics = listOf(
  * that the behavior performs the heap operation described and nothing else.
 */
 val heapFunctions = mutableMapOf<String, HeapOperations>()
+
+/**
+ * Approximated lifecycle from ALLOC -> DEALLOC.
+*/
+val heapLifecycle = mutableMapOf<Pair<CallExpression, VariableDeclaration>, CallExpression?>()
+val highestDeallocCalls = mutableSetOf<CallExpression>()
 
 class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
     private val heapDispatchCandidates = mutableMapOf<LLVMValueRef, HeapOperation>()
@@ -212,25 +223,107 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
         }
     }
 
+    fun resolveAllocation(call: LLVMValueRef?) {
+        if (call == null) return
+        val call = frontend.callsCache[call] ?: return
+        val decl = call.astParent ?: return
+        if (decl !is VariableDeclaration) return
+        heapLifecycle.putIfAbsent(Pair(call, decl), null)
+    }
+
+    fun resolveDeallocation(call: LLVMValueRef?) {
+        if (call == null) return
+        val call = frontend.callsCache[call] ?: return
+
+        // We can't really resolve deallocs here due to aliasing (which doesnt happen until afterwards
+        // so we sort of have to just trust that our callexpr will still be alive (which i don't see why it wouldnt be)
+        // see: lifetimevalidationpass
+        highestDeallocCalls.add(call)
+    }
+
     fun postResolution() {
-        fun traverse(parent: LLVMValueRef, operation: HeapOperation) {
+        fun traverse(call: LLVMValueRef?, parent: LLVMValueRef, operation: HeapOperation) {
             if (operation.operation == HeapOperations.FREE) {
-                if (!isDeallocationWrapper(parent, operation)) return
+                if (!isDeallocationWrapper(parent, operation)) {
+                    resolveDeallocation(call)
+                    return
+                }
             } else if (operation.operation == HeapOperations.ALLOC) {
-                if (!isAllocWrapper(parent)) return
+                if (!isAllocWrapper(parent)) {
+                    resolveAllocation(call)
+                    return
+                }
             }
 
             val function = frontend.bindingsCache[parent.name] ?: return
             if (function is FunctionDeclaration) replaceAllCalls(parent, operation.operation!!)
             frontend.internalCallHierarchy[parent]?.forEach {
-                traverse(it.getFunctionParent()!!, operation)
+                traverse(it, it.getFunctionParent()!!, operation)
             }
         }
 
         for ((candidate, operation) in heapDispatchCandidates) {
             heapFunctions[candidate.name] = operation.operation!!
-            traverse(candidate, operation)
+            traverse(null, candidate, operation)
         }
+    }
+
+    /**
+     * There are times when we can only see the function declaration and have no idea
+     * whether or not it is just an allocation wrapper. For this, a VERY reserved
+     * determination is used.
+     *
+     * F is an implicit allocation wrapper IF:
+     *  - F returns void
+     *  - F accepts a pointer strictly from the parameters AND at least one i32/64.
+     *  - F does not have allocakind attr
+     *  - F is not an intrinsic function
+     * where G is the parent function of the caller of F
+     *  - G returns void
+     *  - G performs NO OTHER CALLS and does NO OTHER STORES
+     *
+     *  Note: the initial CPG is created at this point and the LLVM context is NOT yet discarded.
+    */
+    fun inferImplicitAllocation(instr: LLVMValueRef, nodes: List<Node>) {
+        if (LLVMIsAFunction(instr) == null) return
+        if (instr.name.startsWith("llvm.")) return
+
+        val returnType = LLVMGetTypeKind(LLVMGetReturnType(LLVMGetGEPSourceElementType(instr)))
+        if (returnType != LLVMVoidTypeKind) return
+
+        var hasPointer = false
+        var hasSize = false
+        for (i in 0..<LLVMCountParams(instr)) {
+            val param = LLVMGetParam(instr, i)
+            when (LLVMGetTypeKind(LLVMTypeOf(param))) {
+                LLVMPointerTypeKind -> hasPointer = true
+                LLVMIntegerTypeKind -> hasSize = true
+            }
+        }
+
+        if (!hasPointer || !hasSize) return
+
+        val attributes = instr.getAttributes(LLVMAttributeFunctionIndex) ?: return
+        if (attributes.enumAttributes.contains(LLVMAttributeAllocaKind)) return
+
+        // For caller funcs G
+        val callers = frontend.internalCallHierarchy[instr] ?: return
+        callers.forEach {
+            // since cpg is active, we can query the calls from there.
+            val call = frontend.callsCache[it] ?: return
+            val topFunction = call.getFunctionParent(nodes) ?: return
+
+            // Per the constraints..we only accept those who only call our instr.
+            if (topFunction.nodes.any { n -> n is UnaryOperator }) return
+            if (topFunction.calls.size > 1) return
+
+            val lastNode = topFunction.nodes.last()
+            if (lastNode is EmptyStatement && lastNode.code?.contains("unreachable") == true) return
+
+            resolveAllocation(it)
+        }
+
+        heapFunctions[instr.name] = HeapOperations.ALLOC
     }
 
     fun isLifetimeCall(function: LLVMValueRef) : Boolean {
@@ -246,4 +339,16 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
             LLVMGetEnumAttributeKind(it) == LLVMAttributeAllocaKind
         } != null
     }
+}
+
+
+fun Node.isHeapOperation() : Boolean {
+    return this is HeapOperation ||
+        (this is CallExpression && getProperties(this)["operation"] != null)
+}
+
+
+fun Node.isHeapOperation(type: HeapOperations) : Boolean {
+    if (!this.isHeapOperation()) return false
+    return getProperties(this)["operation"] == type.toString()
 }

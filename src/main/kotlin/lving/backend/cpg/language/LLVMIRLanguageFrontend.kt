@@ -257,6 +257,8 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             counter++
         }
 
+        obscuredFunctions.forEach { heapLifetimeHandler.inferImplicitAllocation(it, flatAST) }
+
         heapLifetimeHandler.postResolution()
 
         LLVMContextDispose(ctxRef)
