@@ -161,6 +161,10 @@ fun Node.setFunctionAttributes(attributes: MutableList<LLVMAttributeRef>) {
 }
 
 fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend) {
+    if (LLVMIsAFunction(instr) == null &&
+        LLVMIsAInstruction(instr) == null) {
+        return
+    }
     if (this.getTrueName() == "llvm.dbg.declare") {
         scheduleDeletion(this)
         if (this is FunctionDeclaration) {
