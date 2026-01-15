@@ -7,6 +7,7 @@ import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Block
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.graph.setProperty
@@ -105,7 +106,7 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
     */
     private fun isDeallocationWrapper(instr: LLVMValueRef, operation: HeapOperation): Boolean {
         if (LLVMIsAFunction(instr) == null) return false
-        if (instr.name in heapFunctions) return true
+        if (instr.name in heapFunctions && heapFunctions[instr.name] == HeapOperations.FREE) return true
 
         val returnType = LLVMGetTypeKind(LLVMGetReturnType(LLVMGetGEPSourceElementType(instr)))
 
@@ -144,6 +145,62 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
         return true
     }
 
+    /**
+     * Function F is an allocation (i wouldn't say realloc) wrapper IF:
+     *   - F does not deallocate memory
+     *   - F at least returns one pointer
+     *      - Based on observation, these are usually the ptr and size, {ptr, ptr} (where 1 ptr is poisoned).
+     *   - F does not do ANYTHING else except for optionally jumping to an alloc error handle call.
+     *      - Based on observation, these blocks are actually marked unreachable in the IR.
+    */
+    private fun isAllocWrapper(instr: LLVMValueRef) : Boolean {
+        if (LLVMIsAFunction(instr) == null) return false
+        if (instr.name in heapFunctions && heapFunctions[instr.name] == HeapOperations.ALLOC) return true
+
+        // Return type:
+        val returnType = LLVMGetReturnType(LLVMGetGEPSourceElementType(instr))
+        val returnTypeKind = LLVMGetTypeKind(returnType)
+
+        // We expect a pointer or an aggregate:
+        when (returnTypeKind) {
+            LLVMPointerTypeKind -> {}
+            LLVMStructTypeKind -> {
+                var gotPointerType = false
+                for (i in 0..<LLVMCountStructElementTypes(returnType)) {
+                    val typeKind = LLVMGetTypeKind(LLVMStructGetTypeAtIndex(returnType, i))
+                    if (typeKind == LLVMPointerTypeKind) {
+                        gotPointerType = true
+                    }
+                }
+                if (!gotPointerType) return false
+            }
+            else -> return false
+        }
+
+        if (LLVMCountParams(instr) == 0) return false
+
+        val function = frontend.bindingsCache[instr.name] ?: return false
+
+        for (call in function.nodes.filter { it is CallExpression && it !is LifetimeOperation}) {
+            val heapCandidate = heapFunctions[call.name.localName]
+
+            if (heapCandidate == null) {
+                // This is a bit more strict than deallocation.
+                // We sort of assume that this function does quite literally nothing else
+                // except for handling an alloc error, but that should be unreachable within non-lto.
+                if (call.astParent is Block) {
+                    // unreachables are classified as an emptystmt, but I'm not sure what else is.. so:
+                    val lastStatement = call.astParent.nodes.lastOrNull() ?: return false
+                    if (lastStatement.code?.contains("unreachable") == false) return false
+                }
+
+            } else if (heapCandidate != HeapOperations.ALLOC) return false
+        }
+
+        heapFunctions[instr.name] = HeapOperations.ALLOC
+        return true
+    }
+
     private fun replaceAllCalls(function: LLVMValueRef, operation: HeapOperations) {
         val seen = HashSet<LLVMValueRef>()
         frontend.internalCallHierarchy[function]?.forEach {
@@ -159,15 +216,19 @@ class HeapLifetimeHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvid
         fun traverse(parent: LLVMValueRef, operation: HeapOperation) {
             if (operation.operation == HeapOperations.FREE) {
                 if (!isDeallocationWrapper(parent, operation)) return
-                val function = frontend.bindingsCache[parent.name] ?: return
-                if (function is FunctionDeclaration) replaceAllCalls(parent, HeapOperations.FREE)
+            } else if (operation.operation == HeapOperations.ALLOC) {
+                if (!isAllocWrapper(parent)) return
             }
+
+            val function = frontend.bindingsCache[parent.name] ?: return
+            if (function is FunctionDeclaration) replaceAllCalls(parent, operation.operation!!)
             frontend.internalCallHierarchy[parent]?.forEach {
                 traverse(it.getFunctionParent()!!, operation)
             }
         }
 
         for ((candidate, operation) in heapDispatchCandidates) {
+            heapFunctions[candidate.name] = operation.operation!!
             traverse(candidate, operation)
         }
     }
