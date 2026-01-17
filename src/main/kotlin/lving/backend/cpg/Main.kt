@@ -14,10 +14,10 @@ import lving.backend.cpg.passes.ThreadValidationPass
 import java.io.File
 
 fun main() {
-    val file = File("test_set/mutex_and_thread.ll")
+    val file = File("test_set/ir/RUSTSEC-2020-0100.ll")
 
     // Optionally, we'll accept <n> .ll files which represent any external libraries.
-    val test = File("test_set/mutex_and_thread.bc")
+    val test = File("test_set/bc/RUSTSEC-2020-0100.bc")
     externalLibraryFiles.add(test)
 
     val inferenceConfig = InferenceConfiguration
@@ -32,7 +32,6 @@ fun main() {
         .registerPass<GeneralResolutionPass>()
         .registerPass<FunctionPtrResolver>()
         .registerPass<BasicAliasResolverPass>()
-//        .registerPass<LifetimeValidationPass>()
         .registerPass<ControlFlowSensitiveDFGPass>()
         .registerPass<ThreadValidationPass>()
         .sourceLocations(file)
@@ -48,6 +47,6 @@ fun main() {
         .analyze()
         .get()
 
-//    result.persistGraph()
+    result.persistGraph()
 }
 

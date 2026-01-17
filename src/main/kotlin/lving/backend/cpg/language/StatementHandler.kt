@@ -1162,11 +1162,6 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
             calledFuncName = opName.name
         }
 
-        // We intercede the currently created call expression if it contains any sort of alloctype
-        if (frontend.heapLifetimeHandler.isLifetimeCall(calledFunc)) {
-            return frontend.heapLifetimeHandler.handle(instr, calledFunc)
-        }
-
         if (frontend.concurrencyHandler.isConcurrencyCall(calledFunc)) {
             return frontend.concurrencyHandler.handle(instr, calledFunc)
         }

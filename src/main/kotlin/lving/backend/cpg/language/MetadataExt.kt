@@ -5,6 +5,7 @@ import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
+import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
@@ -40,6 +41,11 @@ var attributeCache = mutableMapOf<LLVMValueRef, MutableList<LLVMAttributeRef>>()
 // Attributes
 const val NO_CAPTURE = 25
 const val READ_ONLY = 52
+
+val EnumAttributeMap = mutableMapOf(
+    NO_CAPTURE to "NO_CAPTURE",
+    READ_ONLY to "READ_ONLY"
+)
 
 /*
 * When Node.applyMetadataExt is called, the <x>.dbg.spill reference
@@ -123,13 +129,13 @@ private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
     }
 }
 
-fun handleFunctionAttributes(instr: LLVMValueRef, node: Node?) {
+fun handleAttributes(instr: LLVMValueRef, node: Node?, attributeKindId: Int) {
     if (instr in attributeCache) {
         node?.setFunctionAttributes(attributeCache[instr]!!)
         return
     }
 
-    val attrCount = LLVMGetAttributeCountAtIndex(instr, LLVMAttributeFunctionIndex)
+    val attrCount = LLVMGetAttributeCountAtIndex(instr, attributeKindId)
     if (attrCount == 0) return
 
     // to avoid explicit dyn casting to an LLVMAttributeRef (since PointerPointer::get rets a Pointer)
@@ -140,7 +146,7 @@ fun handleFunctionAttributes(instr: LLVMValueRef, node: Node?) {
     val attributesPtr = PointerPointer<LLVMAttributeRef>(
         (Pointer.sizeof(LLVMAttributeRef::class.java) * attrCount).toLong())
     for (i in 0..<attrCount) { attributesPtr.put(LLVMAttributeRef()) }
-    LLVMGetAttributesAtIndex(instr, LLVMAttributeFunctionIndex, attributesPtr)
+    LLVMGetAttributesAtIndex(instr, attributeKindId, attributesPtr)
 
     for (i in 0..<attrCount) {
         attributes.add(attributesPtr.get(LLVMAttributeRef::class.java, i.toLong()))
@@ -156,6 +162,13 @@ fun Node.setFunctionAttributes(attributes: MutableList<LLVMAttributeRef>) {
             val key = LLVMGetStringAttributeKind(it, strPointer).string
             val value = LLVMGetStringAttributeValue(it, strPointer).string
             setProperty(this, key, value)
+        }
+        if (LLVMIsEnumAttribute(it) > 0) {
+            val attributeKind = LLVMGetEnumAttributeKind(it)
+            if (attributeKind in EnumAttributeMap) {
+                val str = EnumAttributeMap[attributeKind]!!
+                setProperty(this, str, "1")
+            }
         }
     }
 }
@@ -173,7 +186,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
     }
 
     if (this is FunctionDeclaration) {
-        handleFunctionAttributes(instr, this)
+        handleAttributes(instr, this, LLVMAttributeFunctionIndex)
     }
 
     if (LLVMHasMetadata(instr) == 0) return
@@ -314,7 +327,7 @@ fun Node.setLocationInfo(filename: String, line: Int) {
     setProperty(this, "filename", filename)
     setProperty(this, "line", line.toString())
     setProperty(this, "isLocal",
-        (filename.split(".").first() in internalFiles).toString())
+        (filename.split("\\").last().split(".").first() in internalFiles).toString())
 }
 
 /**

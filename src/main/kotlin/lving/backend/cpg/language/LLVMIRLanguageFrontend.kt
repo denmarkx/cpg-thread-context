@@ -82,7 +82,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val expressionHandler = ExpressionHandler(this)
 
     val intrinsicHandler = IntrinsicHandler(this)
-    val heapLifetimeHandler = HeapLifetimeHandler(this)
     val concurrencyHandler = ConcurrencyHandler(this)
 
     val typeCache = mutableMapOf<String, Type>()
@@ -256,10 +255,6 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             statementHandler.handlePhi(phiInstr, tu, flatAST)
             counter++
         }
-
-        obscuredFunctions.forEach { heapLifetimeHandler.inferImplicitAllocation(it, flatAST) }
-
-        heapLifetimeHandler.postResolution()
 
         LLVMContextDispose(ctxRef)
         bench.addMeasurement()

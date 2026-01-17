@@ -5,3 +5,7 @@ target/
 *.pdb
 .gradle/
 build/
+ts-comp.py
+test_set/bc/
+test_set/ir/
+test_set/ir_link/

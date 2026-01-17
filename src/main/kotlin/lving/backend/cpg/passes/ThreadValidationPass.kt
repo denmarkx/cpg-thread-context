@@ -40,7 +40,6 @@ import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
-import lving.backend.cpg.language.heapFunctions
 import lving.backend.cpg.language.threadStart2Op
 
 enum class ThreadRelation {
@@ -117,12 +116,12 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     predicate = { x ->
                         x is CallExpression &&
                         x.getTrueName().contains("JoinHandle") &&
-                        x.arguments.any {
-                            a -> a is Reference && (a.refersTo as? HasAliases in handleDecl.aliases)
-                        }
+                        x.arguments.last() is Reference &&
+                        (((x.arguments.last() as Reference).refersTo as? HasAliases in handleDecl.aliases) ||
+                                (x.arguments.last() as Reference).refersTo == handleDecl)
                     },
                     collectFailedPaths = false,
-                    scope = Intraprocedural(100),
+                    scope = Intraprocedural(1000),
                     direction = Forward(GraphToFollow.EOG),
                 ).fulfilled
 
@@ -285,23 +284,13 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 fun traverse(nodes: List<Node>, parent: String) {
                     val noSyncUnaryOps = mutableSetOf<UnaryOperator>()
                     val operations = nodes
-                        .filter { n ->
-                            n is UnaryOperator ||
-                            (n is CallExpression && (
-                                n !is LifetimeOperation) &&
-                                // HeapOperations don't replace the actual call expression (this is a bit of an irregularity right now)
-                                (n.name.localName !in heapFunctions)
-                            )
-                        }
+                        .filter { n -> n is UnaryOperator || (n is CallExpression && (n !is LifetimeOperation))  }
                     operations.forEach { n ->
                             when (n) {
                                 is UnaryOperator -> {
                                     if (isAliasOfThreadData(t, n) && !sync) {
-//                                        println("NO SYNC ON ${n?.code}")
+                                        println("NO SYNC ON ${n?.code}")
                                         noSyncUnaryOps.add(n)
-                                    } else {
-                                        println("OK: ${n?.code}")
-                                        println(n)
                                     }
                                 }
 
@@ -335,6 +324,17 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
 fun Node.getFunctionParent(tuNodes: List<Node>): FunctionDeclaration? {
     return tuNodes.find { it is FunctionDeclaration && this in it.nodes} as FunctionDeclaration?
+}
+
+/**
+ * Walks backwards from node.astParent until functiondecl.
+*/
+fun Node.getFunctionParent(): FunctionDeclaration? {
+    var parent = this.astParent
+    while (parent != null && parent !is FunctionDeclaration) {
+        parent = parent.astParent
+    }
+    return parent
 }
 
 fun Node.getPriorLocalCallExpression(tuNodes: List<Node>): List<CallExpression> {
