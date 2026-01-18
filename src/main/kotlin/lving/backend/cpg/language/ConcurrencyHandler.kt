@@ -16,6 +16,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
+import org.slf4j.LoggerFactory
 
 enum class ConcurrencyOperations {
     CREATE_THREAD,
@@ -61,6 +62,7 @@ val threadStart2Op = mutableMapOf<CallExpression, MainThreadOperation>()
 
 class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvider {
     private val functionToOperationInfo = mutableMapOf<String, Pair<LLVMValueRef, ConcurrencyOperations>>()
+    private val logger = LoggerFactory.getLogger(this::class.java)
 
     fun handle(call: LLVMValueRef, function: LLVMValueRef) : Statement? {
         val operationInfo = functionToOperationInfo[function.name] ?: return null

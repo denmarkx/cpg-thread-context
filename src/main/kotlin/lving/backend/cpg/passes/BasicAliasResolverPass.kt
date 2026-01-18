@@ -55,6 +55,7 @@ class BasicAliasResolverPass(ctx: TranslationContext) : TranslationUnitPass(ctx)
                     when (n) {
                         is UnaryOperator -> {
                             if (n.access == AccessValues.WRITE) {
+                                if (n.input !is HasAliases) return@forEach
                                 addAlias(parent, n.input as HasAliases)
                             } else {
                                 n.nextDFG

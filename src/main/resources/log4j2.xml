@@ -15,6 +15,9 @@
     <Logger name="org.neo4j.ogm.cypher.compiler" level="info" additivity="false">
       <AppenderRef ref="Console"/>
     </Logger>
+    <Logger name="lving.backend.cpg.resolution.ConcurrencyResolutionBase" level="debug" />
+    <Logger name="lving.backend.cpg.resolution.MutexResolution" level="debug" />
+    <Logger name="lving.backend.cpg.language.SynchronizationHandler" level="debug" />
     <Root level="fatal">
       <AppenderRef ref="Console"/>
     </Root>

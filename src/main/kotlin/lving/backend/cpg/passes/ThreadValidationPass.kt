@@ -41,6 +41,8 @@ import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
 import lving.backend.cpg.language.threadStart2Op
+import lving.backend.cpg.resolution.ConcurrencyResolutionManager
+import lving.backend.cpg.resolution.MutexResolution
 
 enum class ThreadRelation {
     BEFORE,
@@ -52,9 +54,14 @@ data class ThreadGroup(val node: Node, val threads: MutableSet<ThreadOperation>,
 
 @ExecuteLast
 class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
+    private val resolverMgr = ConcurrencyResolutionManager()
     val illegalPaths = mutableMapOf<VariableDeclaration, MutableList<NodePath>>()
     val node2Threads = mutableMapOf<Node, MutableList<ThreadOperation>>()
     val groups = mutableSetOf<ThreadGroup>()
+
+    init {
+        resolverMgr.registerResolver(MutexResolution::class.java)
+    }
 
     override fun cleanup() {}
 
@@ -278,6 +285,8 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
 
     fun test() {
         val f = mutableSetOf<String>()
+        groups.forEach { resolverMgr.handleThreadGroup(it) }
+        return
         groups.forEach {
             it.threads.forEach { t ->
                 var sync = false
