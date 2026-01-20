@@ -3,13 +3,15 @@ package lving.backend.cpg
 import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
-import de.fraunhofer.aisec.cpg.passes.ControlFlowSensitiveDFGPass
+import de.fraunhofer.aisec.cpg.graph.scopes.Symbol
+import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import lving.backend.cpg.language.LLVMIRLanguage
 import lving.backend.cpg.language.externalLibraryFiles
 import lving.backend.cpg.neo4j.persistGraph
 import lving.backend.cpg.passes.BasicAliasResolverPass
 import lving.backend.cpg.passes.FunctionPtrResolver
 import lving.backend.cpg.passes.GeneralResolutionPass
+import lving.backend.cpg.passes.InferredEvaluationOrderPass
 import lving.backend.cpg.passes.ThreadValidationPass
 import java.io.File
 
@@ -32,8 +34,8 @@ fun main() {
         .registerPass<GeneralResolutionPass>()
         .registerPass<FunctionPtrResolver>()
         .registerPass<BasicAliasResolverPass>()
-        .registerPass<ControlFlowSensitiveDFGPass>()
         .registerPass<ThreadValidationPass>()
+        .registerPass<InferredEvaluationOrderPass>()
         .sourceLocations(file)
         .useParallelPasses(false)
         .useParallelFrontends(false)

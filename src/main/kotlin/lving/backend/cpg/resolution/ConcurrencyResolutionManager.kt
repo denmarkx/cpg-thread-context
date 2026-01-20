@@ -1,5 +1,6 @@
 package lving.backend.cpg.resolution
 
+import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import lving.backend.cpg.passes.ThreadGroup
 
 class ConcurrencyResolutionManager {
@@ -12,7 +13,7 @@ class ConcurrencyResolutionManager {
     fun handleThreadGroup(group: ThreadGroup) {
         for (thread in group.threads) {
             if (thread.routine == null) continue // XXX: main
-            resolvers.forEach { it.traverse(thread.routine!!, "ROUTINE") }
+            resolvers.forEach { it.traverse(thread.dataParameter!!, thread.routine!!, "ROUTINE") }
         }
     }
 }

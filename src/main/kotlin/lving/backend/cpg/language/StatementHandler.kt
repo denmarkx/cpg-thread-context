@@ -40,6 +40,7 @@ import de.fraunhofer.aisec.cpg.graph.types.ObjectType
 import de.fraunhofer.aisec.cpg.graph.types.PointerType
 import de.fraunhofer.aisec.cpg.helpers.SubgraphWalker
 import de.fraunhofer.aisec.cpg.helpers.annotations.FunctionReplacement
+import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.passes.deferredFunctionPointers
 import lving.backend.cpg.utils.Demangle
 import java.util.function.BiConsumer
@@ -876,6 +877,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         val ptrDerefAssign = newUnaryOperator("*", false, true, rawNode = instr)
         ptrDerefAssign.input = frontend.getOperandValueAtIndex(instr, 0)
+        addLabel(ptrDerefAssign, "Atomic")
 
         val assignment =
             newAssignExpression("=", listOf(ptrDerefAssign), listOf(value), rawNode = instr)
@@ -904,6 +906,7 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         val ptrDeref = newUnaryOperator("*", postfix = false, prefix = true, rawNode = instr)
         ptrDeref.input = ptr
+        addLabel(ptrDeref, "AtomicRMW")
 
         val ptrDerefExch = newUnaryOperator("*", postfix = false, prefix = true, rawNode = instr)
         ptrDerefExch.input = frontend.getOperandValueAtIndex(instr, 0)
@@ -1164,6 +1167,10 @@ class StatementHandler(lang: LLVMIRLanguageFrontend) :
 
         if (frontend.concurrencyHandler.isConcurrencyCall(calledFunc)) {
             return frontend.concurrencyHandler.handle(instr, calledFunc)
+        }
+
+        if (frontend.syncHandler.isSyncFunction(calledFunc)) {
+            return frontend.syncHandler.handle(instr, calledFunc)
         }
 
         var gotoCatch: GotoStatement = newGotoStatement(rawNode = instr)

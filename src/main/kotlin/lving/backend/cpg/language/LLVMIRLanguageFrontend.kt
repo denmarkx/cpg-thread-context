@@ -83,6 +83,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
 
     val intrinsicHandler = IntrinsicHandler(this)
     val concurrencyHandler = ConcurrencyHandler(this)
+    val syncHandler = SynchronizationHandler(this)
 
     val typeCache = mutableMapOf<String, Type>()
     val phiList = mutableListOf<LLVMValueRef>()
@@ -455,6 +456,12 @@ val LLVMValueRef.symbolName: String
 inline val LLVMValueRef.name: String
     get() {
         return LLVMGetValueName(this).string
+    }
+
+/** Returns the full value of LLVMValueRef. */
+inline val LLVMValueRef.code: String
+    get() {
+        return LLVMPrintValueToString(this).string
     }
 
 /**

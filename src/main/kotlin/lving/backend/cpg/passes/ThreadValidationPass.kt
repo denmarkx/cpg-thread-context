@@ -286,6 +286,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     fun test() {
         val f = mutableSetOf<String>()
         groups.forEach { resolverMgr.handleThreadGroup(it) }
+
         return
         groups.forEach {
             it.threads.forEach { t ->
