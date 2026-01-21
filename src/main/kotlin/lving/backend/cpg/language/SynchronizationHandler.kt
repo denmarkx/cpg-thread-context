@@ -21,8 +21,8 @@ class SyncOperation : CallExpression() {
 }
 
 val SyncNativeMap = mutableMapOf(
-    "WaitOnAddress" to SynchronizationTypes.MUTEX_ACQUIRE,
-    "WakeByAddressSingle" to SynchronizationTypes.MUTEX_RELEASE
+    "AcquireSRWLockExclusive" to SynchronizationTypes.MUTEX_ACQUIRE,
+    "ReleaseSRWLockExclusive" to SynchronizationTypes.MUTEX_RELEASE
 )
 
 class SynchronizationHandler(val frontend: LLVMIRLanguageFrontend) {
@@ -70,8 +70,15 @@ class SynchronizationHandler(val frontend: LLVMIRLanguageFrontend) {
             return true
         }
 
+        if (function.name in frontend.externalCallGraph) {
+            val call = frontend.externalCallGraph[function.name]!!
+                .firstOrNull { n -> LLVMGetCalledValue(n).name in SyncNativeMap.keys }  ?: return false
+            functionToOperationInfo[function.name] = Pair(function, SyncNativeMap[LLVMGetCalledValue(call).name]!!)
+            return true
+        }
+
         if (LLVMGetDLLStorageClass(function) != LLVMDLLImportStorageClass) return false
-        if (LLVMGetValueName(function).string !in NativeCallMap) return false
+        if (LLVMGetValueName(function).string !in SyncNativeMap) return false
         functionToOperationInfo[function.name] = Pair(
             function, SyncNativeMap[function.name]!!
         )
