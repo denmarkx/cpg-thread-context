@@ -331,22 +331,32 @@ fun Node.setLocationInfo(filename: String, line: Int) {
 }
 
 /**
+ * for isFunctionUserDefined, a quick cache:
+*/
+private val userDefinedCache = mutableMapOf<String, Boolean>()
+
+/**
  * Given an LLVMValueRef that is a function, determine if any of the instructions are a part
  * of the translation units in the given frontend. This is strictly done through debug info and is very conservative.
 */
 fun LLVMValueRef.isFunctionUserDefined(frontend: LLVMIRLanguageFrontend) : Boolean {
     if (LLVMIsAFunction(this) == null) return this.isUserDefined(frontend)
+    if (this.name in userDefinedCache) return userDefinedCache[this.name]!!
 
     var block = LLVMGetFirstBasicBlock(this)
     while (block != null) {
         var instruction = LLVMGetFirstInstruction(block)
         while (instruction != null) {
-            if (instruction.isUserDefined(frontend)) return true
+            if (instruction.isUserDefined(frontend)) {
+                userDefinedCache[this.name] = true
+                return true
+            }
             instruction = LLVMGetNextInstruction(instruction)
         }
         block = LLVMGetNextBasicBlock(block)
     }
 
+    userDefinedCache[this.name] = false
     return false
 }
 
@@ -355,8 +365,19 @@ fun LLVMValueRef.isFunctionUserDefined(frontend: LLVMIRLanguageFrontend) : Boole
  * It should be noted that this function makes the strict assumption based on name matching of the given IR files.
 */
 fun LLVMValueRef.isUserDefined(frontend: LLVMIRLanguageFrontend) : Boolean {
+    if (LLVMIsAInlineAsm(this) != null) return false
     if (LLVMHasMetadata(this) == 0) return false
-    return false
+    if (LLVMIsAFunction(this) != null) return this.isFunctionUserDefined(frontend)
+    if (LLVMIsACallInst(this) != null) {
+        val function = LLVMGetCalledValue(this)
+        return function.isFunctionUserDefined(frontend)
+    }
+
+    val metadata = LLVMInstructionGetDebugLoc(this) ?: return false
+    val scope = LLVMDILocationGetScope(metadata) ?: return false
+    val diFile = LLVMDIScopeGetFile(scope) ?: return false
+    val filename = LLVMDIFileGetFilename(diFile, IntArray(50)) ?: return false
+    return filename.string.split("\\").last().split(".").first() in internalFiles
 }
 
 /*

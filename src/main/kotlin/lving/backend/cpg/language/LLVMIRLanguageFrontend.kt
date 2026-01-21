@@ -197,12 +197,13 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
         bench.addMeasurement()
         bench = Benchmark(this.javaClass, "Transform to CPG")
 
-        // TODO: The version of LLVM that we are using has an error
+        // TODOx: The version of LLVM that we are using has an error
         //  with LLVMGetFirstDbgRecord() that causes a segfault.
         //  Fortunately, there is not a requirement to use dbg records right now.
         //  ..and we will have to wait for the next maven release for bytedeco's llvm binds.
+        // This was for LLVM-20, which is still an issue, but not for 17.
         //  https://github.com/llvm/llvm-project/pull/151101/files
-        LLVMSetIsNewDbgInfoFormat(mod, 0)
+//        LLVMSetIsNewDbgInfoFormat(mod, 0)
 
         val tu = newTranslationUnitDeclaration(file.name)
         currentTU = tu

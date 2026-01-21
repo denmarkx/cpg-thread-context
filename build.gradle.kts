@@ -27,7 +27,7 @@ dependencies {
     implementation("de.fraunhofer.aisec:cpg-core:10.8.2")
     implementation("de.fraunhofer.aisec:cpg-neo4j:10.8.2")
     implementation("org.neo4j:neo4j-ogm-core:5.0.0")
-    implementation("org.bytedeco:llvm-platform:20.1.7-1.5.12")
+    implementation("org.bytedeco:llvm-platform:17.0.6-1.5.10")
 }
 
 application {

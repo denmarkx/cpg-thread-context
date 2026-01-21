@@ -73,47 +73,80 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         return statement
     }
 
-    // TODO: call param here should be nativeCall
-    fun handleCreateThread(cpgCall: LLVMValueRef, call: LLVMValueRef, system: System) : Statement? {
+    fun handleCreateThread(cpgCall: LLVMValueRef, nativeCall: LLVMValueRef, system: System) : Statement? {
         //  Some programming languages will pass a function pointer as a thread parameter and then an
         //  intermediate library function as the entry point. I haven't found any sort of common ground to know
         //  where the thread actually starts, especially since that function pointer is stored within a vtable.
-        // TODO: C++ (std::thread) and Rust pass a struct { ptr data, ...} to the thread param
+        // Checked this among C++ and Rust (but won't upkeep for C++ at the moment, but the
+        // win here is that this isn't as Rust-specific as I was doing before).
+        // There is one way to know if the thread entry is the "sub-canonical" one (ie: pointing to a dispatch wrapper..
+        // ..but still outside of platform bounds). It is if the thread routine in the OS native call is not found
+        // within our regular IR context..because the names SHOULD match!!
+        val nativeRoutimeParam = LLVMGetOperand(nativeCall, 2)
 
-        //  XXX: These notes are obsolete
-        //  There currently exists an unconventional determination of this.
-        //  A function (that is passed as the start routine to the thread create call) is a dispatch wrapper where:
-        //      - Contains and calls an argument-derived function pointer.
-        //          (Call may be direct or indirect. If indirect, unwind EOG is not followed)
-        //      - The argument pointer must NOT be overridden.
-        //      - All possible execution paths (besides exception handling) direct to the argument-derived func ptr.
-        // The second part of this is knowing what our function pointer is referring to.
-        // If we've made it this far, then we assume that the routine ARG passed to the OS call was the real thread entry.
+        // Additionally, we can check the data sent to our CPG call. If there exists ONE pointer, we can ASSUME
+        // that within that pointer exists a function (with opCode=0) (whether is be directly or within an aggregate object).
+        val count = LLVMGetNumOperands(cpgCall)
+        var containsSinglePointer = false
+        var functionPointerCandidate: LLVMValueRef? = null
 
-        /*
-         * TODO: the followiung is rust specific because I can't 100% figure this part out. coming back to later.
-         */
-        val vtable = LLVMGetOperand(cpgCall, 2) // LLVMGetTypeKind(LLVMGetElementType(LLVMTypeOf(... -> 13 vec
-        val vtable2 = LLVMGetInitializer(vtable)
-        val shim = LLVMGetAggregateElement(vtable2, 2) // funcdecl
+        for (i in 0..<count) {
+            val entryArgs = LLVMGetOperand(cpgCall, i)
+            val typeKind = LLVMGetTypeKind(LLVMTypeOf(entryArgs))
+            if (typeKind == LLVMPointerTypeKind && entryArgs.opCode == 0 && LLVMGetAlignment(entryArgs) >= 8) {
+                if (containsSinglePointer) {
+                    containsSinglePointer = false
+                    functionPointerCandidate = null
+                    break
+                }
 
-        // for rust, shim -> some sys::backtrace call will lead us to the thread start.
-        // closure may be inlined, but the direct call from backtrace would be the closure.
-        // ...going to bypass for now
+                containsSinglePointer = true
+                functionPointerCandidate = entryArgs
+            }
+        }
 
+        var functionPointer : LLVMValueRef? = null
+        if (nativeRoutimeParam.name in frontend.bindingsCache) {
+            // Technically, we can say that this is okay to consider the logical routine.
+            functionPointer = nativeRoutimeParam
+        } else if (containsSinglePointer) {
+            // OK, we're given a function pointer..probably..or a fat pointer that has one.
+            // ..because what else could this be if we couldn't find the given nativeRoutineParam?
+
+            // I don't know if this is necessarily proven:
+            val initializer = LLVMGetInitializer(functionPointerCandidate)
+            when (LLVMGetTypeKind(LLVMTypeOf(initializer))) {
+                // Looks like we are a fat pointer
+                LLVMStructTypeKind -> {
+                    val size = LLVMCountStructElementTypes(LLVMTypeOf(initializer))
+                    for (i in 0..<size) {
+                        val element = LLVMGetAggregateElement(initializer, i)
+
+                        // Looking for a function pointer:
+                        if (LLVMIsAFunction(element) != null) {
+                            // It's possible that there could be more than one in here.
+                            // However, we expect to be led to user code.
+                            if (element.isFunctionUserDefined(frontend)) {
+                                functionPointer = element
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (functionPointer == null) return null
         val threadOperation = ThreadOperation()
         threadOperation.operation = ConcurrencyOperations.CREATE_THREAD
-        threadOperation.applyMetadata(frontend, shim.name, cpgCall)
+        threadOperation.applyMetadata(frontend, functionPointer.name, cpgCall)
 
-        val callee = frontend.newReference(shim.name, frontend.typeOf(shim), rawNode = shim)
+        val callee = frontend.newReference(functionPointer.name, frontend.typeOf(functionPointer), rawNode = functionPointer)
         callee.resolutionHelper = threadOperation
         threadOperation.callee = callee
 
         val data0 = frontend.getOperandValueAtIndex(cpgCall, 1) as Reference
         threadOperation.data.add(data0)
         threadOperation.arguments.add(data0)
-
-        // There is no guarantee that the shim declaration will appear before the thread call.
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)
     }
 
