@@ -16,10 +16,10 @@ import lving.backend.cpg.passes.ThreadValidationPass
 import java.io.File
 
 fun main() {
-    val file = File("test_set/ir/RUSTSEC-2020-0100.ll")
+    val file = File("test_set/RUSTSEC-2020-0116.ll")
 
     // Optionally, we'll accept <n> .ll files which represent any external libraries.
-    val test = File("test_set/bc/RUSTSEC-2020-0100.bc")
+    val test = File("test_set/RUSTSEC-2020-0116.bc")
     externalLibraryFiles.add(test)
 
     val inferenceConfig = InferenceConfiguration

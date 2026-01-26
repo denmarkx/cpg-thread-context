@@ -1,7 +1,13 @@
 package lving.backend.cpg.language
 
+import de.fraunhofer.aisec.cpg.graph.AccessValues
+import de.fraunhofer.aisec.cpg.graph.Node
+import de.fraunhofer.aisec.cpg.graph.applyMetadata
+import de.fraunhofer.aisec.cpg.graph.newCallExpression
+import de.fraunhofer.aisec.cpg.graph.newReference
 import de.fraunhofer.aisec.cpg.graph.statements.Statement
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
+import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.bytedeco.llvm.global.LLVM.LLVMDLLImportStorageClass
@@ -9,6 +15,7 @@ import org.bytedeco.llvm.global.LLVM.LLVMGetCalledValue
 import org.bytedeco.llvm.global.LLVM.LLVMGetDLLStorageClass
 import org.bytedeco.llvm.global.LLVM.LLVMGetValueName
 import org.neo4j.ogm.annotation.Relationship
+import org.neo4j.ogm.annotation.Relationship.Direction
 import org.slf4j.LoggerFactory
 
 enum class SynchronizationTypes {
@@ -16,8 +23,11 @@ enum class SynchronizationTypes {
     MUTEX_RELEASE
 }
 
-class SyncOperation : CallExpression() {
+class MutexOperation : CallExpression() {
     var operation : SynchronizationTypes? = null
+
+    @Relationship("GUARDS", direction = Direction.OUTGOING)
+    val guarding = mutableSetOf<Node>()
 }
 
 val SyncNativeMap = mutableMapOf(
@@ -46,12 +56,45 @@ class SynchronizationHandler(val frontend: LLVMIRLanguageFrontend) {
     private fun handleAcquireMutex(highCallSite: LLVMValueRef, nativeFunctionCall: LLVMValueRef, systemType: System) : Statement? {
         logger.debug("handleAcquireMutex\n  highCallSite: ${highCallSite.code}\n  nativeFunctionCall: ${nativeFunctionCall.code}")
         val x = LLVMGetOperand(highCallSite, 0)
-        return null
+
+        val mutexOp = createMutexOperation(highCallSite)
+        return frontend.statementHandler.declarationOrNot(mutexOp, highCallSite)
+    }
+
+    private fun createMutexOperation(highCallSite: LLVMValueRef) : MutexOperation {
+        val calledFunc = LLVMGetCalledValue(highCallSite)
+        val calledFuncName: CharSequence = LLVMGetValueName(calledFunc).string
+
+        frontend.internalCallHierarchy.putIfAbsent(calledFunc, mutableSetOf())
+        frontend.internalCallHierarchy[calledFunc]?.add(highCallSite)
+
+        val callee = frontend.statementHandler.newReference(calledFuncName, frontend.typeOf(calledFunc), rawNode = calledFunc)
+        callee.applyMetadataExt(calledFunc, frontend)
+
+        val callExpr = MutexOperation()
+        callExpr.applyMetadata(callee, calledFuncName, highCallSite, true)
+        callee.resolutionHelper = callExpr
+        callExpr.callee = callee
+        callExpr.template = false
+
+        val max = LLVMGetNumOperands(highCallSite) - 1
+        var idx = 0
+
+        while (idx < max) {
+            val operandName = frontend.getOperandValueAtIndex(highCallSite, idx)
+            callExpr.addArgument(operandName)
+            idx++
+        }
+        callExpr.applyMetadataExt(highCallSite, frontend)
+        frontend.callsCache[highCallSite] = callExpr
+        return callExpr
     }
 
     private fun handleReleaseMutex(highCallSite: LLVMValueRef, nativeFunctionCall: LLVMValueRef, systemType: System) : Statement? {
         logger.debug("handleReleaseMutex\n  highCallSite: ${highCallSite.code}\n  nativeFunctionCall: ${nativeFunctionCall.code}")
-        return null
+
+        val mutexOp = createMutexOperation(highCallSite)
+        return frontend.statementHandler.declarationOrNot(mutexOp, highCallSite)
     }
 
     /**

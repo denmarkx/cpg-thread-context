@@ -36,13 +36,10 @@ import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
-import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
 import lving.backend.cpg.language.threadStart2Op
-import lving.backend.cpg.resolution.ConcurrencyResolutionManager
-import lving.backend.cpg.resolution.MutexResolution
 
 enum class ThreadRelation {
     BEFORE,
@@ -54,14 +51,8 @@ data class ThreadGroup(val node: Node, val threads: MutableSet<ThreadOperation>,
 
 @ExecuteLast
 class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
-    private val resolverMgr = ConcurrencyResolutionManager()
-    val illegalPaths = mutableMapOf<VariableDeclaration, MutableList<NodePath>>()
     val node2Threads = mutableMapOf<Node, MutableList<ThreadOperation>>()
     val groups = mutableSetOf<ThreadGroup>()
-
-    init {
-        resolverMgr.registerResolver(MutexResolution::class.java)
-    }
 
     override fun cleanup() {}
 
@@ -115,7 +106,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                  * JOIN RESOLUTION
                 */
                 // find the join call which should be somewhere after z.
-                // xxx: would be something that has pthread_join or waitforsingleobject&closehandle, but..........
+                // xxx: would be something that has pthread_join or waitforsingleobject&closehandle,
                 val handlePtr = (spawnCall.arguments.first() as Reference)
                 val handleDecl = handlePtr.refersTo as? HasAliases ?: return@forEach
 
@@ -144,7 +135,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         }
 
         assignRelationships()
-        test()
     }
 
     /**
@@ -283,53 +273,6 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
         return variables
     }
 
-    fun test() {
-        val f = mutableSetOf<String>()
-        groups.forEach { resolverMgr.handleThreadGroup(it) }
-
-        return
-        groups.forEach {
-            it.threads.forEach { t ->
-                var sync = false
-                fun traverse(nodes: List<Node>, parent: String) {
-                    val noSyncUnaryOps = mutableSetOf<UnaryOperator>()
-                    val operations = nodes
-                        .filter { n -> n is UnaryOperator || (n is CallExpression && (n !is LifetimeOperation))  }
-                    operations.forEach { n ->
-                            when (n) {
-                                is UnaryOperator -> {
-                                    if (isAliasOfThreadData(t, n) && !sync) {
-                                        println("NO SYNC ON ${n?.code}")
-                                        noSyncUnaryOps.add(n)
-                                    }
-                                }
-
-                                is CallExpression -> {
-                                    if (!n.getTrueName().contains("sync")) {
-                                        traverse(n.invokes.first().nodes, n.invokes.first().getTrueName())
-                                    }
-                                    if (n.getTrueName().contains("Mutex<T>::lock")) sync = true
-                                    if (n.getTrueName()
-                                            .contains("core::ptr::drop_in_place<std::sync::poison::mutex::MutexGuard")
-                                    ) sync = false
-                                }
-                            }
-                        }
-
-                    val allUnaryOps = operations.filter { n -> n is UnaryOperator}
-                    if (allUnaryOps.size == noSyncUnaryOps.size && noSyncUnaryOps.isNotEmpty()) {
-                        f.add(parent)
-                    }
-                }
-                if (t.routine == null && t is MainThreadOperation) {
-                    traverse(t.nodes.toList(), "MAIN")
-                } else {
-                    traverse(t.routine.nodes, "ROUTINE")
-                }
-            }
-        }
-        println(f)
-    }
 }
 
 fun Node.getFunctionParent(tuNodes: List<Node>): FunctionDeclaration? {

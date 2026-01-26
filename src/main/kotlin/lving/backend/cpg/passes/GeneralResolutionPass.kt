@@ -34,8 +34,6 @@ import lving.backend.cpg.graph.hasLabel
 import lving.backend.cpg.utils.Demangle
 import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.language.getTrueName
-import lving.backend.cpg.resolution.MutexDropInPlaceStr
-import lving.backend.cpg.resolution.MutexLockStr
 
 @DependsOn(EvaluationOrderGraphPass::class)
 @DependsOn(DFGPass::class)
@@ -145,12 +143,12 @@ class GeneralResolutionPass(ctx: TranslationContext) : TranslationUnitPass(ctx) 
     }
 
     fun handleCallExpression(node: CallExpression) {
-        if (node.getTrueName() == MutexLockStr) {
-            addLabel(node, "SyncNodeStart")
-        }
-        if (node.getTrueName() == MutexDropInPlaceStr) {
-            addLabel(node, "SyncNodeEnd")
-        }
+//        if (node.getTrueName() == MutexLockStr) {
+//            addLabel(node, "SyncNodeStart")
+//        }
+//        if (node.getTrueName() == MutexDropInPlaceStr) {
+//            addLabel(node, "SyncNodeEnd")
+//        }
     }
 
     fun handleVariableDeclaration(node: VariableDeclaration) {
