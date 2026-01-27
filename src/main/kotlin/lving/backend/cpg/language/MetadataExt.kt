@@ -203,6 +203,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         }
 
         // Everything else can get the filename and line as normal:
+        if (LLVMGetMetadataKind(entry) == LLVMGenericDINodeMetadataKind) return
         val diFile = LLVMDIScopeGetFile(entry)
         val filename = LLVMDIFileGetFilename(diFile, IntArray(50)).string
         val line = LLVMDISubprogramGetLine(entry)
@@ -415,6 +416,8 @@ fun LLVMValueRef.isMainEntryPoint() : Boolean {
     if (LLVMHasMetadata(this) == 0) return false
     val mde = LLVMInstructionGetAllMetadataOtherThanDebugLoc(this, SizeTPointer(64))
     val entry = LLVMValueMetadataEntriesGetMetadata(mde, 0)
+
+    if (LLVMGetMetadataKind(entry) != LLVMDISubprogramMetadataKind) return false
     if (entry == null || entry.isNull) return false
 
     // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.

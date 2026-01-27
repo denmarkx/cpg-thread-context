@@ -22,6 +22,7 @@ import de.fraunhofer.aisec.cpg.graph.edges.flows.Dataflow
 import de.fraunhofer.aisec.cpg.graph.followEOGEdgesUntilHit
 import de.fraunhofer.aisec.cpg.graph.followPrevDFG
 import de.fraunhofer.aisec.cpg.graph.nodes
+import de.fraunhofer.aisec.cpg.graph.returns
 import de.fraunhofer.aisec.cpg.graph.scopes.GlobalScope
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.NewArrayExpression
@@ -36,6 +37,7 @@ import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.getProperties
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.language.ConcurrencyOperations
+import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
 import lving.backend.cpg.language.getTrueName
@@ -63,6 +65,8 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
             .forEach { it as ThreadOperation
                 val threadClosure = it.invokes.first().resolveUntilLocal().lastOrNull() ?: return@forEach
+                val returnStmt : Node? = threadClosure.returns.firstOrNull()
+
                 addLabel(threadClosure, "LogicalThreadDeclaration")
                 it.routine = threadClosure
 
@@ -100,6 +104,21 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     connectNodes(moved, highestVariable, "LOGICAL_REGISTER")
                     node2Threads.putIfAbsent(highestVariable, mutableListOf())
                     node2Threads[highestVariable]?.add(it)
+                }
+
+                /*
+
+                */
+                if (returnStmt != null) {
+                    // Try to continue until we can get to our returnStmt.
+                    // ..though we're a bit conservative about this part.
+                    val path = threadClosure.followEOGEdgesUntilHit(
+                        predicate = { n ->
+                            println(n)
+                            n == returnStmt },
+                        collectFailedPaths = false
+                    )
+                    println(path.fulfilled.size)
                 }
 
                 /*
@@ -265,7 +284,10 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                                 )
                             }
                         }
-                        is CallExpression -> { get(it.invokes.first())}
+                        is LifetimeOperation -> {}
+                        is CallExpression -> {
+                            if (it.invokes.isNotEmpty())
+                                get(it.invokes.first())}
                     }
                 }
         }

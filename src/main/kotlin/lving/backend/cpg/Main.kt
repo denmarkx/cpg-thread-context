@@ -3,8 +3,6 @@ package lving.backend.cpg
 import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
-import de.fraunhofer.aisec.cpg.graph.scopes.Symbol
-import de.fraunhofer.aisec.cpg.passes.SymbolResolver
 import lving.backend.cpg.language.LLVMIRLanguage
 import lving.backend.cpg.language.externalLibraryFiles
 import lving.backend.cpg.neo4j.persistGraph
@@ -16,10 +14,12 @@ import lving.backend.cpg.passes.ThreadValidationPass
 import java.io.File
 
 fun main() {
-    val file = File("test_set/RUSTSEC-2020-0116.ll")
+    val rustFileName = "RUSTSEC-2020-0102"
+
+    val file = File("test_set/ir/$rustFileName.ll")
 
     // Optionally, we'll accept <n> .ll files which represent any external libraries.
-    val test = File("test_set/RUSTSEC-2020-0116.bc")
+    val test = File("test_set/bc/$rustFileName.bc")
     externalLibraryFiles.add(test)
 
     val inferenceConfig = InferenceConfiguration
