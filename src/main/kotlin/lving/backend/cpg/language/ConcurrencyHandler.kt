@@ -13,6 +13,7 @@ import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Reference
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.UnaryOperator
+import de.fraunhofer.aisec.cpg.persistence.DoNotPersist
 import org.bytedeco.llvm.LLVM.LLVMValueRef
 import org.bytedeco.llvm.global.LLVM.*
 import org.neo4j.ogm.annotation.Relationship
@@ -28,13 +29,21 @@ enum class System {
 }
 
 val NativeCallMap = mapOf(
-    "CreateThread" to ConcurrencyOperations.CREATE_THREAD
+    "CreateThread" to ConcurrencyOperations.CREATE_THREAD,
+    "pthread_create" to ConcurrencyOperations.CREATE_THREAD
 )
 
 class MainThreadOperation : ThreadOperation() {
     @Relationship("SCOPE", direction = Relationship.Direction.OUTGOING)
     var nodes = mutableSetOf<Node>()
 }
+
+data class ThreadInfo(
+    val functionPointer: LLVMValueRef,
+    val dataPointer: Expression,
+) {}
+
+val deferredThreadOperations = mutableListOf<ThreadInfo>()
 
 open class ThreadOperation : CallExpression() {
     var operation : ConcurrencyOperations? = null
@@ -89,20 +98,28 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         val count = LLVMGetNumOperands(cpgCall)
         var containsSinglePointer = false
         var functionPointerCandidate: LLVMValueRef? = null
+        var dataPointerId = -1
 
         for (i in 0..<count) {
             val entryArgs = LLVMGetOperand(cpgCall, i)
             val typeKind = LLVMGetTypeKind(LLVMTypeOf(entryArgs))
-            if (typeKind == LLVMPointerTypeKind && entryArgs.opCode == 0 && LLVMGetAlignment(entryArgs) >= 8) {
-                if (containsSinglePointer) {
-                    containsSinglePointer = false
-                    functionPointerCandidate = null
-                    break
-                }
+            if (typeKind == LLVMPointerTypeKind) {
 
-                containsSinglePointer = true
-                functionPointerCandidate = entryArgs
-            }
+                if (LLVMGetAlignment(entryArgs) >= 8) {
+                    if (entryArgs.opCode == 0) {
+                        if (containsSinglePointer) {
+                            containsSinglePointer = false
+                            functionPointerCandidate = null
+                            break
+                        }
+
+                        containsSinglePointer = true
+                        functionPointerCandidate = entryArgs
+                    } else if (entryArgs.opCode != LLVMAlloca){
+                        dataPointerId = i
+                    }
+                }
+             }
         }
 
         var functionPointer : LLVMValueRef? = null
@@ -136,6 +153,8 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         }
 
         if (functionPointer == null) return null
+        if (dataPointerId == -1) return null
+
         val threadOperation = ThreadOperation()
         threadOperation.operation = ConcurrencyOperations.CREATE_THREAD
         threadOperation.applyMetadata(frontend, functionPointer.name, cpgCall)
@@ -144,7 +163,7 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         callee.resolutionHelper = threadOperation
         threadOperation.callee = callee
 
-        val data0 = frontend.getOperandValueAtIndex(cpgCall, 1) as Reference
+        val data0 = frontend.getOperandValueAtIndex(cpgCall, dataPointerId) as Reference
         threadOperation.data.add(data0)
         threadOperation.arguments.add(data0)
         return frontend.statementHandler.declarationOrNot(threadOperation, cpgCall)

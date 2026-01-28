@@ -31,6 +31,7 @@ import de.fraunhofer.aisec.cpg.frontends.LanguageFrontend
 import de.fraunhofer.aisec.cpg.frontends.TranslationException
 import de.fraunhofer.aisec.cpg.graph.*
 import de.fraunhofer.aisec.cpg.graph.declarations.Declaration
+import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.TranslationUnitDeclaration
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.Expression
@@ -109,6 +110,7 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
     val inverseBindingsCache = mutableMapOf<Declaration, LLVMValueRef>()
 
     val callsCache = mutableMapOf<LLVMValueRef, CallExpression>()
+    val functionsCache = mutableMapOf<String, FunctionDeclaration>()
 
     /**
      * This contains a cache binding between an LLVMValueRef (representing a variable) and its
@@ -246,6 +248,10 @@ class LLVMIRLanguageFrontend(ctx: TranslationContext, language: Language<LLVMIRL
             if (declaration != null) {
                 scopeManager.addDeclaration(declaration)
                 tu.declarations += declaration
+            }
+
+            if (declaration is FunctionDeclaration) {
+                functionsCache[declaration!!.name.localName] = declaration as FunctionDeclaration
             }
 
             func = LLVMGetNextFunction(func)

@@ -35,7 +35,9 @@ import de.fraunhofer.aisec.cpg.passes.configuration.ExecuteLast
 import lving.backend.cpg.graph.addLabel
 import lving.backend.cpg.graph.connectNodes
 import lving.backend.cpg.graph.getProperties
+import lving.backend.cpg.graph.hasProperty
 import lving.backend.cpg.graph.resolveUntilLocal
+import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.language.ConcurrencyOperations
 import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
@@ -109,17 +111,21 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 /*
 
                 */
-                if (returnStmt != null) {
-                    // Try to continue until we can get to our returnStmt.
-                    // ..though we're a bit conservative about this part.
-                    val path = threadClosure.followEOGEdgesUntilHit(
-                        predicate = { n ->
-                            println(n)
-                            n == returnStmt },
-                        collectFailedPaths = false
-                    )
-                    println(path.fulfilled.size)
-                }
+//                if (returnStmt != null) {
+//                    // Try to continue until we can get to our returnStmt.
+//                    // ..though we're a bit conservative about this part.
+//                    val path = threadClosure.followEOGEdgesUntilHit(
+//                        predicate = { n ->
+//                            n == returnStmt },
+//                        collectFailedPaths = false
+//                    )
+//                    path.fulfilled.forEach { np ->
+//                        np.nodes.forEach { n ->
+////                            connectNodes(n, it, "INTERACTION")
+//                        }
+//                    }
+//                    println(path.fulfilled.size)
+//                }
 
                 /*
                  * JOIN RESOLUTION
@@ -235,6 +241,7 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                     val rel = relation(b, a)
                     if (rel == ThreadRelation.TOGETHER) {
                         group.threads.add(b)
+                        connectNodes(a, b, "HAPPENS_TOGETHER")
                     }
                 }
             }
