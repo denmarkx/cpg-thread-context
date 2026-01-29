@@ -3,6 +3,7 @@ package lving.backend.cpg.passes
 import de.fraunhofer.aisec.cpg.TranslationContext
 import de.fraunhofer.aisec.cpg.graph.AnalysisDirection
 import de.fraunhofer.aisec.cpg.graph.AnalysisSensitivity
+import de.fraunhofer.aisec.cpg.graph.Backward
 import de.fraunhofer.aisec.cpg.graph.Context
 import de.fraunhofer.aisec.cpg.graph.ContextSensitive
 import de.fraunhofer.aisec.cpg.graph.FilterUnreachableEOG
@@ -39,6 +40,7 @@ import lving.backend.cpg.graph.hasProperty
 import lving.backend.cpg.graph.resolveUntilLocal
 import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.language.ConcurrencyOperations
+import lving.backend.cpg.language.JoinOperation
 import lving.backend.cpg.language.LifetimeOperation
 import lving.backend.cpg.language.MainThreadOperation
 import lving.backend.cpg.language.ThreadOperation
@@ -56,12 +58,30 @@ data class ThreadGroup(val node: Node, val threads: MutableSet<ThreadOperation>,
 @ExecuteLast
 class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
     val node2Threads = mutableMapOf<Node, MutableList<ThreadOperation>>()
+    val spawnCall2LogicalJoin = mutableMapOf<CallExpression, CallExpression>()
     val groups = mutableSetOf<ThreadGroup>()
 
     override fun cleanup() {}
 
     override fun accept(t: TranslationUnitDeclaration) {
         val nodes = SubgraphWalker.flattenAST(t)
+
+        // Given that we are quite limited within our EOG, we will work around
+        nodes
+            .filter { n -> n is JoinOperation }
+            .forEach { n -> n as JoinOperation
+                n.getPriorLocalCallExpression(nodes)
+                    .forEach { join ->
+                        addLabel(join, "LogicalJoinOperation")
+
+                        val handle = join.operatorArguments.firstOrNull() as? Reference ?: return@forEach
+                        val handleDecl = handle.refersTo as? VariableDeclaration ?: return@forEach
+                        val reference = handleDecl.nextDFG.find { x -> x != handle } ?: return@forEach
+                        if (reference.astParent is CallExpression) {
+                            spawnCall2LogicalJoin[reference.astParent as CallExpression] = join
+                        }
+                    }
+            }
 
         nodes
             .filter { it is ThreadOperation && it.operation == ConcurrencyOperations.CREATE_THREAD }
@@ -109,48 +129,13 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 }
 
                 /*
-
-                */
-//                if (returnStmt != null) {
-//                    // Try to continue until we can get to our returnStmt.
-//                    // ..though we're a bit conservative about this part.
-//                    val path = threadClosure.followEOGEdgesUntilHit(
-//                        predicate = { n ->
-//                            n == returnStmt },
-//                        collectFailedPaths = false
-//                    )
-//                    path.fulfilled.forEach { np ->
-//                        np.nodes.forEach { n ->
-////                            connectNodes(n, it, "INTERACTION")
-//                        }
-//                    }
-//                    println(path.fulfilled.size)
-//                }
-
-                /*
                  * JOIN RESOLUTION
                 */
-                // find the join call which should be somewhere after z.
-                // xxx: would be something that has pthread_join or waitforsingleobject&closehandle,
-                val handlePtr = (spawnCall.arguments.first() as Reference)
-                val handleDecl = handlePtr.refersTo as? HasAliases ?: return@forEach
-
-                val path = handlePtr.followEOGEdgesUntilHit(
-                    predicate = { x ->
-                        x is CallExpression &&
-                        x.getTrueName().contains("JoinHandle") &&
-                        x.arguments.last() is Reference &&
-                        (((x.arguments.last() as Reference).refersTo as? HasAliases in handleDecl.aliases) ||
-                                (x.arguments.last() as Reference).refersTo == handleDecl)
-                    },
-                    collectFailedPaths = false,
-                    scope = Intraprocedural(1000),
-                    direction = Forward(GraphToFollow.EOG),
-                ).fulfilled
-
-                if (path.isEmpty()) return@forEach
-                val joinCall = path.first().nodes.last()
-                it.threadJoin = joinCall as CallExpression
+                // Could we find a join?
+                if (spawnCall in spawnCall2LogicalJoin) {
+                    val join = spawnCall2LogicalJoin[spawnCall]
+                    it.threadJoin = join
+                }
             }
 
         val threadOps = nodes.filterIsInstance<ThreadOperation>()
@@ -239,9 +224,15 @@ class ThreadValidationPass(ctx: TranslationContext) : TranslationUnitPass(ctx) {
                 for (j in i + 1 until v.size) {
                     val b = v[j]
                     val rel = relation(b, a)
-                    if (rel == ThreadRelation.TOGETHER) {
-                        group.threads.add(b)
-                        connectNodes(a, b, "HAPPENS_TOGETHER")
+                    when (rel) {
+                        ThreadRelation.AFTER ->
+                            connectNodes(a, b, "HAPPENS_AFTER")
+                        ThreadRelation.BEFORE ->
+                            connectNodes(a, b, "HAPPENS_BEFORE")
+                        ThreadRelation.TOGETHER -> {
+                            group.threads.add(b)
+                            connectNodes(a, b, "HAPPENS_TOGETHER")
+                        }
                     }
                 }
             }

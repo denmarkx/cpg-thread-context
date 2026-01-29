@@ -1,5 +1,11 @@
 package lving.backend.cpg
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.main
+import com.github.ajalt.clikt.core.subcommands
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.file
 import de.fraunhofer.aisec.cpg.InferenceConfiguration
 import de.fraunhofer.aisec.cpg.TranslationConfiguration
 import de.fraunhofer.aisec.cpg.TranslationManager
@@ -13,18 +19,28 @@ import lving.backend.cpg.passes.InferredEvaluationOrderPass
 import lving.backend.cpg.passes.ThreadValidationPass
 import java.io.File
 
-fun main() {
-    val rustFileName = "RUSTSEC-2020-0102"
+class CCPGRust : CliktCommand() {
+    val file by argument().file(mustExist = true)
+
+    override fun run() {
+        println(file)
+    }
+}
+
+val inferenceConfig = InferenceConfiguration
+    .builder()
+    .build()
+
+fun main(args: Array<String>) {
+    CCPGRust().main(args)
+
+    val rustFileName = "RUSTSEC-2020-0116"
 
     val file = File("test_set/ir/$rustFileName.ll")
 
     // Optionally, we'll accept <n> .ll files which represent any external libraries.
     val test = File("test_set/bc/$rustFileName.bc")
     externalLibraryFiles.add(test)
-
-    val inferenceConfig = InferenceConfiguration
-        .builder()
-        .build()
 
     val translationConfig = TranslationConfiguration
         .builder()
@@ -49,6 +65,6 @@ fun main() {
         .analyze()
         .get()
 
-    result.persistGraph()
+//    result.persistGraph()
 }
 

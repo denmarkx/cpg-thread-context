@@ -21,7 +21,8 @@ import org.slf4j.LoggerFactory
 
 enum class ConcurrencyOperations {
     CREATE_THREAD,
-    MAIN_THREAD
+    MAIN_THREAD,
+    JOIN_THREAD,
 }
 
 enum class System {
@@ -30,8 +31,13 @@ enum class System {
 
 val NativeCallMap = mapOf(
     "CreateThread" to ConcurrencyOperations.CREATE_THREAD,
-    "pthread_create" to ConcurrencyOperations.CREATE_THREAD
+    "pthread_create" to ConcurrencyOperations.CREATE_THREAD,
+    "pthread_join" to ConcurrencyOperations.JOIN_THREAD,
 )
+
+class JoinOperation : CallExpression() {
+
+}
 
 class MainThreadOperation : ThreadOperation() {
     @Relationship("SCOPE", direction = Relationship.Direction.OUTGOING)
@@ -42,8 +48,6 @@ data class ThreadInfo(
     val functionPointer: LLVMValueRef,
     val dataPointer: Expression,
 ) {}
-
-val deferredThreadOperations = mutableListOf<ThreadInfo>()
 
 open class ThreadOperation : CallExpression() {
     var operation : ConcurrencyOperations? = null
@@ -77,9 +81,25 @@ class ConcurrencyHandler(val frontend: LLVMIRLanguageFrontend) : MetadataProvide
         val operationInfo = functionToOperationInfo[function.name] ?: return null
         val statement : Statement? = when (operationInfo.second) {
             ConcurrencyOperations.CREATE_THREAD -> handleCreateThread(call, operationInfo.first, System.WINDOWS)
+            ConcurrencyOperations.JOIN_THREAD -> handleJoinThread(call, operationInfo.first, System.WINDOWS)
             ConcurrencyOperations.MAIN_THREAD -> null
         }
         return statement
+    }
+
+    fun handleJoinThread(cpgCall: LLVMValueRef, nativeCall: LLVMValueRef, system: System) : Statement? {
+        val calledFunc = LLVMGetCalledValue(cpgCall)
+
+        val joinOperation = JoinOperation()
+        joinOperation.applyMetadata(frontend, calledFunc.name, cpgCall)
+
+        val callee = frontend.newReference(calledFunc.name, frontend.typeOf(calledFunc), rawNode = calledFunc)
+        callee.resolutionHelper = joinOperation
+        joinOperation.callee = callee
+
+        val data0 = frontend.getOperandValueAtIndex(cpgCall, 0) as Reference
+        joinOperation.arguments.add(data0)
+        return frontend.statementHandler.declarationOrNot(joinOperation, cpgCall)
     }
 
     fun handleCreateThread(cpgCall: LLVMValueRef, nativeCall: LLVMValueRef, system: System) : Statement? {
