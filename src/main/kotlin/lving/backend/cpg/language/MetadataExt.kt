@@ -1,11 +1,9 @@
 package lving.backend.cpg.language
 
-import de.fraunhofer.aisec.cpg.frontends.LanguageFrontend
 import de.fraunhofer.aisec.cpg.graph.AccessValues
 import de.fraunhofer.aisec.cpg.graph.Node
 import de.fraunhofer.aisec.cpg.graph.collectAllNextDFGPaths
 import de.fraunhofer.aisec.cpg.graph.declarations.FunctionDeclaration
-import de.fraunhofer.aisec.cpg.graph.declarations.ParameterDeclaration
 import de.fraunhofer.aisec.cpg.graph.declarations.ValueDeclaration
 import de.fraunhofer.aisec.cpg.graph.nodes
 import de.fraunhofer.aisec.cpg.graph.statements.expressions.CallExpression
@@ -22,14 +20,11 @@ import lving.backend.cpg.graph.scheduleDeletion
 import lving.backend.cpg.graph.setMetadata
 import lving.backend.cpg.graph.setProperty
 import lving.backend.cpg.utils.Demangle
-import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.IntPointer
 import org.bytedeco.javacpp.Pointer
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.javacpp.SizeTPointer
-import org.bytedeco.javacpp.annotation.ArrayAllocator
 import org.bytedeco.llvm.LLVM.LLVMAttributeRef
-import org.bytedeco.llvm.LLVM.LLVMDIBuilderRef
 import org.bytedeco.llvm.LLVM.LLVMMetadataRef
 import org.bytedeco.llvm.LLVM.LLVMTypeRef
 import java.util.Collections
@@ -91,8 +86,6 @@ fun handleDeferredDebugSpillNodes() {
 }
 
 private fun handleTrueRegisterRef(value: ValueDeclaration, v: List<String>) {
-    // TODO: Despite the fact that k is received from x.refersTo, k.refs is empty.
-    // Luckily, REFERS_TO is accompanied with a USAGE edge.
     val ref = value.usages.find { it.access == AccessValues.WRITE } ?: return
     scheduleDeletion(ref)
 
@@ -319,7 +312,7 @@ fun Node.applyMetadataExt(instr: LLVMValueRef, frontend: LLVMIRLanguageFrontend)
         filename = split[split.size - 1]
     }
 
-    // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is lving.backend.cpg.main
+    // TODO: I can't find an acceptable way to get DISubprogram to check if the entry name is main
     // ...so anything that is not prefixed by /rustc/ is assumed to be "user-code"
     setLocationInfo(filename, line)
 }
@@ -421,7 +414,7 @@ fun LLVMValueRef.isMainEntryPoint() : Boolean {
     if (entry == null || entry.isNull) return false
 
     // XXX: entry is a DISubprogram. There are no bindings atm for DISubprogram::DISPFlags.
-    // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the lving.backend.cpg.main entry.
+    // Right now, the only important flag would be DISPFlagMainSubprogram. Regardless of language, this is the main entry.
     val dispStr = LLVMPrintValueToString(LLVMMetadataAsValue(ctxRef, entry)).string
     return dispStr.contains("DISPFlagMainSubprogram")
 }

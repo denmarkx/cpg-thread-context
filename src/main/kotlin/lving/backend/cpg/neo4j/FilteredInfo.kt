@@ -16,7 +16,7 @@ val FILTERED_EDGES = listOf(
     "ASSIGNED_TYPES",
     "CANDIDATES",
     "LANGUAGE",
-    "SCOPE", // this is useful (maybe) but i cant stand it popping up in neo4j right now
+    "SCOPE",
     "TYPE",
     "TYPE_OBSERVERS",
     "SECONDARY_TYPES"
